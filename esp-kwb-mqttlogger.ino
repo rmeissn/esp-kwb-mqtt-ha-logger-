@@ -159,7 +159,7 @@ struct ef2
   double HK1_Vorlauf = 0.0;
   double Ruecklauf = 0.0;
   double Boiler = 0.0;
-  double Temp[10];
+  double Temp[20];
 };
 
 struct ef2 Kessel, oKessel; // akt. und "letzter" Kesselzustandd
@@ -273,7 +273,7 @@ void setup() {
   sprintf(msg, "%.3f", 0);
   client.publish("kwb/kwh", msg);
 
-  for (int r = 0; r < 10; r++)
+  for (int r = 0; r < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); r++)
   {
     Kessel.Temp[r] = 0.0;
   }
@@ -325,15 +325,15 @@ void loop() {
   // Control MSG  / Von Bediengerät an Kessel
   if (nID == 33)
   {
-    Kessel.Pumpepuffer = getbit(anData, 2, 7);
-    Kessel.Zuendung = getbit(anData, 16, 2);
-    Kessel.KeineStoerung = getbit(anData, 3, 0);
-    Kessel.Reinigung = getbit(anData, 3, 7);
-    Kessel.Drehrost = getbit(anData, 3, 6);
-    Kessel.Raumaustragung = getbit(anData, 9, 2);
     Kessel.RLAVentil = getbit(anData, 2, 3);
-    Kessel.Hauptantrieb = getval2(anData, 12, 2, 10, 0);
+    Kessel.Pumpepuffer = getbit(anData, 2, 7);
+    Kessel.KeineStoerung = getbit(anData, 3, 0);
+    Kessel.Drehrost = getbit(anData, 3, 6);
+    Kessel.Reinigung = getbit(anData, 3, 7);
+    Kessel.Raumaustragung = getbit(anData, 9, 2);
     Kessel.Hauptantriebtakt = getval2(anData, 10, 2, 10, 0);
+    Kessel.Hauptantrieb = getval2(anData, 12, 2, 10, 0);
+    Kessel.Zuendung = getbit(anData, 16, 2);
 
     // kwh summieren
     double deltat = (milli - kwhtimer) / (3600.0 * 1000.0); // in h
@@ -382,9 +382,20 @@ void loop() {
     Kessel.Temp[7] = getval2(anData, 42, 2, 0.1, 1);
     Kessel.Temp[8] = getval2(anData, 44, 2, 0.1, 1);
     Kessel.Temp[9] = getval2(anData, 46, 2, 0.1, 1);
-    
+    Kessel.Temp[10] = getval2(anData, 48, 2, 0.1, 1);
+    Kessel.Temp[11] = getval2(anData, 50, 2, 0.1, 1);
+    //unbekanntes Bitfeld?
     Kessel.Saugzug = getval2(anData, 69, 2, 0.6, 0);
     Kessel.Geblaese = getval2(anData, 71, 2, 0.6, 0);
+    Kessel.Temp[12] = getval2(anData, 73, 2, 0.1, 1);
+    Kessel.Temp[13] = getval2(anData, 75, 2, 0.1, 1);
+    Kessel.Temp[14] = getval2(anData, 77, 2, 0.1, 1);
+    Kessel.Temp[15] = getval2(anData, 79, 2, 0.1, 1);
+    Kessel.Temp[16] = getval2(anData, 81, 2, 0.1, 1);
+    Kessel.Temp[17] = getval2(anData, 83, 2, 0.1, 1);
+    Kessel.Temp[18] = getval2(anData, 85, 2, 0.1, 1);
+    Kessel.Temp[19] = getval2(anData, 87, 2, 0.1, 1);
+    //Bitfeld 89?
 
     // zwei gleiche impulse, die vom akt. unterschiedlich sind
     if ((Kessel.Hauptantriebimpuls == oKessel.Hauptantriebimpuls)
@@ -463,51 +474,51 @@ void loop() {
     oKessel.Zuendung = Kessel.Zuendung;
   }
 
-  if (Kessel.HK1_Vorlauf != oKessel.HK1_Vorlauf)
+  if (tempdiff(Kessel.HK1_Vorlauf, oKessel.HK1_Vorlauf, 0.4))
   {
     send_value("kwb/HK1_Vorlauf", Kessel.HK1_Vorlauf);
     oKessel.HK1_Vorlauf = Kessel.HK1_Vorlauf;
   }
   
-  if (Kessel.Ruecklauf != oKessel.Ruecklauf)
+  if (tempdiff(Kessel.Ruecklauf, oKessel.Ruecklauf, 0.4))
   {
     send_value("kwb/Ruecklauf", Kessel.Ruecklauf);
     oKessel.Ruecklauf = Kessel.Ruecklauf;
   }
   
-  if (Kessel.Boiler != oKessel.Boiler)
+  if (tempdiff(Kessel.Boiler, oKessel.Boiler, 0.4))
   {
     send_value("kwb/Boiler", Kessel.Boiler);
     oKessel.Boiler = Kessel.Boiler;
   }
 
-  if (Kessel.Proztemperatur != oKessel.Proztemperatur)
+  if (tempdiff(Kessel.Proztemperatur, oKessel.Proztemperatur, 0.4))
   {
     send_value("kwb/Proztemperatur", Kessel.Proztemperatur);
     oKessel.Proztemperatur = Kessel.Proztemperatur;
   }
 
-  if (Kessel.Puffer_unten != oKessel.Puffer_unten)
+  if (tempdiff(Kessel.Puffer_unten, oKessel.Puffer_unten, 0.4))
   {
     send_value("kwb/Puffer_unten", Kessel.Puffer_unten);
     oKessel.Puffer_unten = Kessel.Puffer_unten;
   }
 
-  if (Kessel.Puffer_oben != oKessel.Puffer_oben)
+  if (tempdiff(Kessel.Puffer_oben, oKessel.Puffer_oben, 0.4))
   {
     send_value("kwb/Puffer_oben", Kessel.Puffer_oben);
     oKessel.Puffer_oben = Kessel.Puffer_oben;
   }
 
-  if (Kessel.HK1_aussen != oKessel.HK1_aussen)
+  if (tempdiff(Kessel.HK1_aussen, oKessel.HK1_aussen, 0.4))
   {
     send_value("kwb/HK1_aussen", Kessel.HK1_aussen);
     oKessel.HK1_aussen = Kessel.HK1_aussen;
   }
 
-  for (i = 0; i < 10; i++)
+  for (i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++)
   {
-    if (Kessel.Temp[i] != oKessel.Temp[i])
+    if (tempdiff(Kessel.Temp[i], oKessel.Temp[i], 0.4))
     {
       sprintf(msg, "kwb/Temp%d", i);
       send_value(msg, Kessel.Temp[i]);
@@ -521,157 +532,159 @@ void loop() {
   // wenn Änderung alle x*60 Sekunden Ausgabe an MQTT
   if (milli > (timer1 + updatemin * 60 * 1000))
   {
-    // Wenn sich etwas an den Daten getan hat
-    if (memcmp(&oKessel, &Kessel, sizeof(Kessel)))
+    mqttreconnect();
+    
+    bytecounter = 0;
+
+    if (Kessel.Raumaustragung == 0)
     {
-      mqttreconnect();
-      
-      bytecounter = 0;
-
-      sprintf(msg, "%d / %d", framecounter, errorcounter);
-      client.publish("kwb/frames/errors", msg);
-      framecounter = 0;
-      errorcounter = 0;
-
-      //sprintf(msg, "%d", Kessel.HauptantriebUD);
-      //client.publish("kwb/HauptantriebUD", msg);
-
-      //sprintf(msg, "%d", Kessel.Hauptantriebzeit / 1000);
-      //client.publish("kwb/Hauptantriebzeit", msg);
-
-      //sprintf(msg, "%2.1f", (double) Kessel.Hauptantriebtakt / 1000.0);
-      //client.publish("kwb/Hauptantriebtakt", msg);
-
-      sprintf(msg, "%d", (int)( (((double)Kessel.Hauptantriebzeit)*HAfaktor) / 1000));
-      client.publish("kwb/Pellets", msg);
-
-      // Messung Über Schneckenantrieb
-      sprintf(msg, "%d", (int)(((float)Kessel.Schneckengesamtlaufzeit * NAfaktor)  ));
-      client.publish("kwb/PelletsNA", msg);
-
-      // akt Verbrauch berechnen
-      if (Kessel.HauptantriebUD - UD)
-      {
-        int d, p;
-        d = (Kessel.HauptantriebUD - UD) * 3600 * 1000 / (milli - timerd);
-
-        // Besp   3.58 * 60 * 60    1000ms / 5000ms
-        p = (int) (HAfaktor * 60 * 60 * ( Kessel.Hauptantriebzeit - ZD) ) / (milli - timerd) ;
-        sprintf(msg, "%d", p);
-        client.publish("kwb/deltaPelletsh", msg);
-
-        Kessel.Leistung = LEISTUNGKESSEL * TAKT100 * ((double) ( Kessel.Hauptantriebzeit - ZD)) / ((double) (milli - timerd)) ;
-        sprintf(msg, "%2.1f", Kessel.Leistung);
-        client.publish("kwb/Leistung", msg);
-        
-        if (Kessel.Leistung < 1.0 )
-        {
-          client.publish("kwb/deltaPelletsh", "0");
-        }
-        
-        // Verbrauch pro Stunde gemessen über NA
-        sprintf(msg, "%d", (int) ((float)(Kessel.Schneckengesamtlaufzeit - SL) * NAfaktor * 1000.0 * 3600.0 / ( milli - timerd)));
-        client.publish("kwb/deltaPelletsNAh", msg);
-
-        SL = Kessel.Schneckengesamtlaufzeit;
-
-        UD = Kessel.HauptantriebUD;
-        //sprintf(msg, "%d", (millis() - timerd) / 1000);
-        //client.publish("kwb/deltat", msg);
-        ZD = Kessel.Hauptantriebzeit;
-        timerd = milli;
-      }
-
-      //////////////////////////////////////////////
-      // Berechnung HA/NA Verhältnis
-      // Alle xx Min  berechnen (-> ca. 1.9 wenn der sinkt gibt es Förderprobleme)
-      if (milli > ( HANAtimer + 30 * 60  * 1000))
-      {
-        HANAtimer = milli;
-        double v;
-
-        if ((Kessel.Hauptantriebzeit - HAz) && (Kessel.Schneckengesamtlaufzeit - NAz)) // Wenn der HA lief
-        {
-          v = (float) (Kessel.Hauptantriebzeit - HAz) / ((float)(Kessel.Schneckengesamtlaufzeit - NAz) * 1000.0  ) ;
-          sprintf(msg, "%f", v);
-          client.publish("kwb/HANA", msg);
-          NAz = Kessel.Schneckengesamtlaufzeit;
-          HAz = Kessel.Hauptantriebzeit;
-        }
-      }
-
-      if (Kessel.Schneckengesamtlaufzeit != oKessel.Schneckengesamtlaufzeit)
-      {
-        oKessel.Schneckengesamtlaufzeit = Kessel.Schneckengesamtlaufzeit;
-      }
-
-      if (Kessel.KeineStoerung != oKessel.KeineStoerung)
-      {
-        sprintf(msg, "%d", 1 - Kessel.KeineStoerung);
-        client.publish("kwb/Stoerung", msg);
-      }
-
-      oKessel.Leistung = Kessel.Leistung;
-      if (Kessel.kwh != oKessel.kwh)
-      {
-        sprintf(msg, "%.3f", Kessel.kwh);
-        client.publish("kwb/kwh", msg);
-      }
-
-      if (Kessel.Brennerstunden != oKessel.Brennerstunden)
-      {
-        sprintf(msg, "%.3f", Kessel.Brennerstunden);
-        client.publish("kwb/Brennerstunden", msg);
-      }
-
-      if (Kessel.Pumpepuffer != oKessel.Pumpepuffer)
-      {
-        sprintf(msg, "%d", Kessel.Pumpepuffer );
-        client.publish("kwb/Pumpepuffer", msg);
-      }
-
-      if (Kessel.Raumaustragung != oKessel.Raumaustragung)
-      {
-        sprintf(msg, "%d", Kessel.Raumaustragung);
-        client.publish("kwb/Raumaustragung", msg);
-      }
-
-      if (Kessel.Kesseltemperatur != oKessel.Kesseltemperatur)
-      {
-        sprintf(msg, "%.1f", Kessel.Kesseltemperatur);
-        client.publish("kwb/Kesseltemperatur", msg);
-      }
-      if (Kessel.Rauchgastemperatur != oKessel.Rauchgastemperatur)
-      {
-        sprintf(msg, "%.1f", Kessel.Rauchgastemperatur);
-        client.publish("kwb/Rauchgastemperatur", msg);
-      }
-
-      if ((Kessel.Saugzug != oKessel.Saugzug ) || (Kessel.Geblaese != oKessel.Geblaese))
-      {
-        sprintf(msg, "%.0f / %.0f", Kessel.Saugzug,Kessel.Geblaese);
-        client.publish("kwb/Saugzug", msg);
-        sprintf(msg, "%.1f", Kessel.Unterdruck );
-        client.publish("kwb/Unterdruck", msg);
-        
-        if (Kessel.Geblaese > 10.0)
-          client.publish("kwb/Kessel", "brennt");
-        else
-          client.publish("kwb/Kessel", "aus");
-      }
-     
-      sprintf(msg, "%d", Kessel.ext);
-      client.publish("kwb/Anforderung", msg);
-
-      if (Kessel.photo != oKessel.photo)
-      {
-        sprintf(msg, "%d", ((int) (Kessel.photo + 255.0) * 100) >> 9);
-        client.publish("kwb/photodiode", msg);
-      }
-
-      memcpy(&oKessel, &Kessel, sizeof Kessel);
+      // live reporting Schneckenlaufzeitausgabe 
+      sprintf(msg, "%d", Kessel.Schneckenlaufzeit);
+      client.publish("kwb/Schneckenlaufzeit", msg);
+      oKessel.Schneckenlaufzeit = Kessel.Schneckenlaufzeit;
+    }
+  
+    sprintf(msg, "%d", Kessel.Reinigung);
+    client.publish("kwb/Reinigung", msg);
+  
+    sprintf(msg, "%d", Kessel.Zuendung);
+    client.publish("kwb/Zuendung", msg);
+  
+    send_value("kwb/HK1_Vorlauf", Kessel.HK1_Vorlauf);
+    
+    send_value("kwb/Ruecklauf", Kessel.Ruecklauf);
+    
+    send_value("kwb/Boiler", Kessel.Boiler);
+  
+    send_value("kwb/Proztemperatur", Kessel.Proztemperatur);
+  
+    send_value("kwb/Puffer_unten", Kessel.Puffer_unten);
+  
+    send_value("kwb/Puffer_oben", Kessel.Puffer_oben);
+  
+    send_value("kwb/HK1_aussen", Kessel.HK1_aussen);
+  
+    for (i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++)
+    {
+      sprintf(msg, "kwb/Temp%d", i);
+      send_value(msg, Kessel.Temp[i]);
     }
 
+    sprintf(msg, "%d / %d", framecounter, errorcounter);
+    client.publish("kwb/frames/errors", msg);
+    framecounter = 0;
+    errorcounter = 0;
+
+    sprintf(msg, "%d", Kessel.HauptantriebUD);
+    client.publish("kwb/HauptantriebUD", msg);
+
+    sprintf(msg, "%d", Kessel.Hauptantriebzeit / 1000);
+    client.publish("kwb/Hauptantriebzeit", msg);
+
+    sprintf(msg, "%2.1f", (double) Kessel.Hauptantriebtakt / 1000.0);
+    client.publish("kwb/Hauptantriebtakt", msg);
+
+    sprintf(msg, "%d", (int)( (((double)Kessel.Hauptantriebzeit)*HAfaktor) / 1000));
+    client.publish("kwb/Pellets", msg);
+
+    // Messung Über Schneckenantrieb
+    sprintf(msg, "%d", (int)(((float)Kessel.Schneckengesamtlaufzeit * NAfaktor)  ));
+    client.publish("kwb/PelletsNA", msg);
+
+    // akt Verbrauch berechnen
+    if (Kessel.HauptantriebUD - UD)
+    {
+      int d, p;
+      d = (Kessel.HauptantriebUD - UD) * 3600 * 1000 / (milli - timerd);
+
+      // Besp   3.58 * 60 * 60    1000ms / 5000ms
+      p = (int) (HAfaktor * 60 * 60 * ( Kessel.Hauptantriebzeit - ZD) ) / (milli - timerd) ;
+      sprintf(msg, "%d", p);
+      client.publish("kwb/deltaPelletsh", msg);
+
+      Kessel.Leistung = LEISTUNGKESSEL * TAKT100 * ((double) ( Kessel.Hauptantriebzeit - ZD)) / ((double) (milli - timerd)) ;
+      sprintf(msg, "%2.1f", Kessel.Leistung);
+      client.publish("kwb/Leistung", msg);
+      
+      if (Kessel.Leistung < 1.0 )
+      {
+        client.publish("kwb/deltaPelletsh", "0");
+      }
+      
+      // Verbrauch pro Stunde gemessen über NA
+      sprintf(msg, "%d", (int) ((float)(Kessel.Schneckengesamtlaufzeit - SL) * NAfaktor * 1000.0 * 3600.0 / ( milli - timerd)));
+      client.publish("kwb/deltaPelletsNAh", msg);
+
+      SL = Kessel.Schneckengesamtlaufzeit;
+
+      UD = Kessel.HauptantriebUD;
+      //sprintf(msg, "%d", (millis() - timerd) / 1000);
+      //client.publish("kwb/deltat", msg);
+      ZD = Kessel.Hauptantriebzeit;
+      timerd = milli;
+    }
+
+    //////////////////////////////////////////////
+    // Berechnung HA/NA Verhältnis
+    // Alle xx Min  berechnen (-> ca. 1.9 wenn der sinkt gibt es Förderprobleme)
+    if (milli > ( HANAtimer + 30 * 60  * 1000))
+    {
+      HANAtimer = milli;
+      double v;
+
+      if ((Kessel.Hauptantriebzeit - HAz) && (Kessel.Schneckengesamtlaufzeit - NAz)) // Wenn der HA lief
+      {
+        v = (float) (Kessel.Hauptantriebzeit - HAz) / ((float)(Kessel.Schneckengesamtlaufzeit - NAz) * 1000.0  ) ;
+        sprintf(msg, "%f", v);
+        client.publish("kwb/HANA", msg);
+        NAz = Kessel.Schneckengesamtlaufzeit;
+        HAz = Kessel.Hauptantriebzeit;
+      }
+    }
+
+    oKessel.Schneckengesamtlaufzeit = Kessel.Schneckengesamtlaufzeit;
+
+    sprintf(msg, "%d", 1 - Kessel.KeineStoerung);
+    client.publish("kwb/Stoerung", msg);
+
+    oKessel.Leistung = Kessel.Leistung;
+    sprintf(msg, "%.3f", Kessel.kwh);
+    client.publish("kwb/kwh", msg);
+
+    sprintf(msg, "%.3f", Kessel.Brennerstunden);
+    client.publish("kwb/Brennerstunden", msg);
+
+    sprintf(msg, "%d", Kessel.Pumpepuffer );
+    client.publish("kwb/Pumpepuffer", msg);
+
+    sprintf(msg, "%d", Kessel.Raumaustragung);
+    client.publish("kwb/Raumaustragung", msg);
+
+    sprintf(msg, "%.1f", Kessel.Kesseltemperatur);
+    client.publish("kwb/Kesseltemperatur", msg);
+
+    sprintf(msg, "%.1f", Kessel.Rauchgastemperatur);
+    client.publish("kwb/Rauchgastemperatur", msg);
+
+    sprintf(msg, "%.0f / %.0f", Kessel.Saugzug,Kessel.Geblaese);
+    client.publish("kwb/Saugzug", msg);
+
+    sprintf(msg, "%.1f", Kessel.Unterdruck );
+    client.publish("kwb/Unterdruck", msg);
+      
+    if (Kessel.Geblaese > 10.0)
+      client.publish("kwb/Kessel", "brennt");
+    else
+      client.publish("kwb/Kessel", "aus");
+   
+    sprintf(msg, "%d", Kessel.ext);
+    client.publish("kwb/Anforderung", msg);
+
+    sprintf(msg, "%d", ((int) (Kessel.photo + 255.0) * 100) >> 9);
+    client.publish("kwb/photodiode", msg);
+
+    memcpy(&oKessel, &Kessel, sizeof Kessel);
+    
     timer1 = milli;
   } // timer1 Ausgabe alle 5min
 

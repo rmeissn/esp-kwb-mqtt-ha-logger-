@@ -264,7 +264,7 @@ int readframe(unsigned char anData[], int &nID, int &nDataLen, int &fid, int &er
 }
   
 // liefert ne 1 wenn die beiden char Blöcke unterschiedlich sind
-bool  messne(unsigned char * a, unsigned char * b, int sz)
+bool messne(unsigned char * a, unsigned char * b, int sz)
 {
   int i;
 
@@ -272,6 +272,11 @@ bool  messne(unsigned char * a, unsigned char * b, int sz)
     if (a[i] != b[i]) return (1);
 
   return (0);
+}
+
+bool tempdiff(double a, double b, double d)
+{
+  return (abs(a - b) >= d);
 }
 
 // qsort requires you to create a sort function
