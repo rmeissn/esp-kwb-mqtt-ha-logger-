@@ -1,0 +1,5 @@
+#define WIFISSID "SSID"
+#define WIFIPW "PW"
+#define MQTTSERVER "IP"
+#define MQTTUSER "USERNAME"
+#define MQTTPASSWORD "PW"
