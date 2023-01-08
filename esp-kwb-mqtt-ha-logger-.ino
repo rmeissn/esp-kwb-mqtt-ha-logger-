@@ -41,26 +41,26 @@ int updateEveryMinutes = 1;
 // Globals
 
 int HauptantriebsImpuls = 0;
-long UD = 0, ZD = 0, AustragungsGesamtLaufzeit = 0; // UD = Umdrehungen?
+long Umdrehungen = 0, ZD = 0, AustragungsGesamtLaufzeit = 0;
 long NebenantriebsZeit = 0, HauptantriebsZeit = 0, HANAtimer = 0; // Timer zur Ausgabe der Hauptantrieb/Nebenantrieb Ratio
 
 extern long bytecounter;
 extern long framecounter;
 extern long errorcounter;
 
-//  gemessen 308gr auf 229 UD = 1.3449
-//  Empirische aus 26KW Leistung 1.3338
-//  24,7KW/4.8 mit 2338 UD -> 2.200
-//  22KW * 0.8 * 9,4h  *  4kg /h  / 1642 UD =
+//  gemessen 308gr / 229 Umdrehungen = 1.35 g/Umdrehung (passt)
+//  Empirische aus 26KW Leistung 1.3338 (???)
+//  24,7KW / 4.8 mit 2338 Umdrehungen -> 2.200 (???)
+//  22KW * 0.8 * 9,4h * 4kg/h / 1642 Umdrehungen =
 
 // gemessen am Hauptantrieb
-// 310gr 207UD = 1,495 g/UD > 3,58 g/s
-// 200gr auf 135 UDs = 1.48 = 56s > 2,78
-// 298gr auf 207 UDs = 1.44 = 86s > 3,46g/s
+// 310gr / 207 Umdrehungen = 1,498 g/Umdrehung (passt) -> 3,58 g/s (???)
+// 200gr / 135 Umdrehungen = 1.48 g/Umdrehung (passt) -> auf 56s -> 2,78 g/s (Nein?)
+// 298gr /  207 Umdrehungen = 1.44 g/Umdrehung (passt) -> auf 86s > 3,46 g/s (passt)
 
-// macht ca. 2.4 UD /s  bei Norm Betrieb 187 UD in 3 Min
-// nied Fallrohrstand 160UD auf 200gr = 1.25
-// Nebenantrieb/Schnecke: 1990gr mit 373 s = 5.33gr/s
+// macht ca. 207 Umdrehungen / 86s = 2.4 Umdrehungen/s bei Normbetrieb -> 187 Umdrehungen in 3 Min (???)
+// nied Fallrohrstand 160 Umdrehungen auf 200gr = 1.25 (???)
+// Nebenantrieb/Schnecke: 1990gr mit 373 s = 5.34 gr/s (passt)
 
 double Nebenantriebsfaktor = 5.4;
 double Hauptantriebsfakter = (400.0 / 128.0) ; // 400g in 120sek. > 3.333 g/s
@@ -92,7 +92,7 @@ struct ef2 {
   int Raumaustragung = 0;
   int Hauptantriebimpuls = 0; // Impulszähler
   int Hauptantrieb = 0 ;      // Hauptantrieb Motorlaufzeit in Millisekunden
-  int HauptantriebUD = 0; // Umdrehungen Stoker
+  int HauptantriebUmdrehungen = 0; // Umdrehungen Stoker
   int DrehungSaugschlauch = 0; // -1 left, 0 off, 1 right
   unsigned long HauptantriebsZeit = 1; // Gesamt Hauptantriebszeit in Millisekunden
   unsigned long Hauptantriebtakt = 1; // Taktzeit in Millisekunden
@@ -110,7 +110,7 @@ struct ef2 {
   double Temp[20];
 };
 
-struct ef2 Kessel, oKessel; // akt. und "letzter" Kesselzustandd
+struct ef2 Kessel, oKessel; // akt. und "letzter" Kesselzustand
 
 #include "espinclude.h"
 
@@ -359,7 +359,7 @@ void readSenseMSGFrame(unsigned char* anData, unsigned long currentMillis) {
   if ((Kessel.Hauptantriebimpuls == oKessel.Hauptantriebimpuls) && (Kessel.Hauptantriebimpuls != HauptantriebsImpuls )) {
     // Hauptantrieb läuft und produziert Impulse
     HauptantriebsImpuls = Kessel.Hauptantriebimpuls;
-    Kessel.HauptantriebUD++; // vollst. Takte zählen
+    Kessel.HauptantriebUmdrehungen++; // vollst. Takte zählen
     oKessel.Hauptantriebimpuls = Kessel.Hauptantriebimpuls;
   } // Impulsende
 
@@ -376,12 +376,12 @@ void publishFastChangingValues() {
     oKessel.Drehrost = Kessel.Drehrost;
   }
 
-  if(abs(Kessel.photo - oKessel.photo) >= 5) {
+  if (abs(Kessel.photo - oKessel.photo) >= 5) {
     kessel_photodiode.setValue((int) Kessel.photo);
     oKessel.photo = Kessel.photo;
   }
 
-  if  (Kessel.Raumaustragung != oKessel.Raumaustragung) {
+  if (Kessel.Raumaustragung != oKessel.Raumaustragung) {
     // debugLog(Kessel.Raumaustragung, "%d", "kwb/austragung");
     kessel_raumaustragung.setState((((int)(Kessel.Raumaustragung)) == 0) ? false : true);
     oKessel.Raumaustragung = Kessel.Raumaustragung;
@@ -456,7 +456,7 @@ void otherStuff(unsigned long currentMillis) {
   //   debugLog(Kessel.Temp[i], "%d", "kwb/temp" + i);
   // }
 
-  // kessel_hauptantriebud.setValue(Kessel.HauptantriebUD); // HASensorNumber int
+  // kessel_HauptantriebUmdrehungen.setValue(Kessel.HauptantriebUmdrehungen); // HASensorNumber int
   // kessel_HauptantriebsZeit.setValue(Kessel.HauptantriebsZeit); // HASensorNumber int
   // kessel_hauptantriebtakt.setValue(float(Kessel.Hauptantriebtakt / 1000.0)); // HASensorNumber %2.1f
   // kessel_pellets.setValue((int) ((((double)Kessel.HauptantriebsZeit)*Hauptantriebsfakter) / 1000)); // HASensorNumber int
@@ -469,10 +469,10 @@ void otherStuff(unsigned long currentMillis) {
   // debugLog(errorcounter, "%d", "kwb/errors");
 
   // akt Verbrauch berechnen
-  if (Kessel.HauptantriebUD - UD) {
+  if (Kessel.HauptantriebUmdrehungen - Umdrehungen) {
     int d, p;
 
-    d = (Kessel.HauptantriebUD - UD) * 3600 * 1000 / (currentMillis - timerd);
+    d = (Kessel.HauptantriebUmdrehungen - Umdrehungen) * 3600 * 1000 / (currentMillis - timerd);
     // Besp   3.58 * 60 * 60    1000ms / 5000ms
     p = (int) (Hauptantriebsfakter * 60 * 60 * ( Kessel.HauptantriebsZeit - ZD) ) / (currentMillis - timerd) ;
     // kessel_deltapelletsh.setValue(p); // HASensorNumber int
@@ -487,7 +487,7 @@ void otherStuff(unsigned long currentMillis) {
     // kessel_deltapelletnsh.setValue((int) ((float)(Kessel.AustragungsGesamtLaufzeit - AustragungsGesamtLaufzeit) * Nebenantriebsfaktor * 1000.0 * 3600.0 / ( currentMillis - timerd))); // HASensorNumber int
 
     AustragungsGesamtLaufzeit = Kessel.AustragungsGesamtLaufzeit;
-    UD = Kessel.HauptantriebUD;
+    Umdrehungen = Kessel.HauptantriebUmdrehungen;
     // kessel_deltat.setValue((millis() - timerd) / 1000); // HASensorNumber int
     ZD = Kessel.HauptantriebsZeit;
     timerd = currentMillis;
