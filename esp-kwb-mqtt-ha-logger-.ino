@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <ArduinoHA.h>
+#include <math.h>
 
 #define STATE_WAIT_FOR_HEADER 1
 #define STATE_READ_MSG  2
@@ -359,6 +360,13 @@ void loop() {
     Kessel.Temp[19] = getval2(anData, 87, 2, 0.1, 1);
     //Bitfeld 89?
 
+    // Range photo -221 to 127 - 348 numbers
+    // x + 255 - offset to zero / range -> 0 to 1 * 100 -> range 0 to 100
+    Kessel.photo = round(((Kessel.photo + 221.0) / 348) * 100);
+    Kessel.photo = (Kessel.photo < 0) ? 0 : (Kessel.photo > 100) ? 100 : Kessel.photo;
+    // old way
+    // Kessel.photo = ((int) (Kessel.photo + 255.0) * 100) >> 9; // Result range 6 to 74
+
     // zwei gleiche impulse, die vom akt. unterschiedlich sind
     if ((Kessel.Hauptantriebimpuls == oKessel.Hauptantriebimpuls) && (Kessel.Hauptantriebimpuls != HAimp )) {
       // Hauptantrieb läuft und produziert Impulse
@@ -371,6 +379,12 @@ void loop() {
   } // Ende Sense Paket auslesen
 
   // manche Werte direkt ausgeben, wenn eine Änderung eintrifft
+
+  if(abs(Kessel.photo - oKessel.photo) >= 5) {
+    kessel_photodiode.setValue((int) Kessel.photo);
+    oKessel.photo = Kessel.photo;
+  }
+
   // Wenn die Schnecke stehen geblieben ist und vorher lief Schneckenaufzeitausgeben
   if  (Kessel.Raumaustragung != oKessel.Raumaustragung) {
     kessel_raumaustragung.setState((((int)(Kessel.Raumaustragung)) == 0) ? false : true);
@@ -417,15 +431,12 @@ void loop() {
     kessel_zuendung.setState((((int)(Kessel.Zuendung)) == 0) ? false : true);
     kessel_pumpe.setState((((int)(Kessel.Pumpepuffer)) == 0) ? false : true);
     kessel_raumaustragung.setState((((int)(Kessel.Raumaustragung)) == 0) ? false : true);
-    // Bereich photo -221 bis 127 (Ergebnis 6 bis 74)
-    // x + 255 - offset to zero / range -> 0 to 1 * 100 -> range 0 to 100
-    // #include <math.h>
-    // int photodiode = round((x + 255 - 34) / 348 * 100)
-    int photodiode = ((int) (Kessel.photo + 255.0) * 100) >> 9;
     float geblaese = float(Kessel.Geblaese);
-    kessel_photodiode.setValue(photodiode);
     kessel_geblaese.setValue(geblaese);
+    kessel_photodiode.setValue((int) Kessel.photo);
     kessel_saugzug.setValue(float(Kessel.Saugzug));
+    int photodiode = (int) Kessel.photo;
+
     if(photodiode > 95 && geblaese > 10 )
       kessel.setValue("Brennt");
     if(photodiode < 10 && geblaese == 0 )
