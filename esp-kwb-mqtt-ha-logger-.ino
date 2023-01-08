@@ -40,9 +40,9 @@ int updateEveryMinutes = 1;
 
 // Globals
 
-int HAimp = 0;
-long UD = 0, ZD = 0, SL = 0; // Schneckenlaufzeit
-long NAz = 0, HAz = 0, HANAtimer = 0; // Timer zur Ausgabe der HANA Ratio
+int HauptantriebsImpuls = 0;
+long UD = 0, ZD = 0, AustragungsGesamtLaufzeit = 0; // UD = Umdrehungen?
+long NebenantriebsZeit = 0, HauptantriebsZeit = 0, HANAtimer = 0; // Timer zur Ausgabe der Hauptantrieb/Nebenantrieb Ratio
 
 extern long bytecounter;
 extern long framecounter;
@@ -53,7 +53,7 @@ extern long errorcounter;
 //  24,7KW/4.8 mit 2338 UD -> 2.200
 //  22KW * 0.8 * 9,4h  *  4kg /h  / 1642 UD =
 
-// gemessen am HA
+// gemessen am Hauptantrieb
 // 310gr 207UD = 1,495 g/UD > 3,58 g/s
 // 200gr auf 135 UDs = 1.48 = 56s > 2,78
 // 298gr auf 207 UDs = 1.44 = 86s > 3,46g/s
@@ -62,14 +62,14 @@ extern long errorcounter;
 // nied Fallrohrstand 160UD auf 200gr = 1.25
 // Nebenantrieb/Schnecke: 1990gr mit 373 s = 5.33gr/s
 
-double NAfaktor = 5.4;
-double HAfaktor = (400.0 / 128.0) ; // 400g in 120sek. > 3.333 g/s
+double Nebenantriebsfaktor = 5.4;
+double Hauptantriebsfakter = (400.0 / 128.0) ; // 400g in 120sek. > 3.333 g/s
 
 unsigned long bytecount = 0;
 unsigned long waitcount = 0;
 unsigned long longwaitcount = 0;
 unsigned long timerd = 0, lastUpdateCycleMillis = 0;
-unsigned long timerschnecke = 0;
+unsigned long austragungStartedAtMillis = 0;
 unsigned long timerHauptantrieb = 0 ;
 unsigned long kwhtimer = 0; // Zeit seit letzer KW Messung
 
@@ -86,15 +86,16 @@ struct ef2 {
   int Reinigung = 0;
   int Zuendung = 0;
   int Drehrost = 0;
-  int Schneckenlaufzeit = 0;
-  int Schneckengesamtlaufzeit = 0;
+  int Austragungslaufzeit = 0;
+  int AustragungsGesamtLaufzeit = 0;
   int KeineStoerung = 0;
   int Raumaustragung = 0;
   int Hauptantriebimpuls = 0; // Impulszähler
-  int Hauptantrieb = 0 ;      // HAMotor Laufzeit in Millisekunden
+  int Hauptantrieb = 0 ;      // Hauptantrieb Motorlaufzeit in Millisekunden
   int HauptantriebUD = 0; // Umdrehungen Stoker
-  unsigned long Hauptantriebzeit = 1; // Gesamt HAzeit in millisekunden
-  unsigned long Hauptantriebtakt = 1; // Taktzeit in millisekunden
+  int DrehungSaugschlauch = 0; // -1 left, 0 off, 1 right
+  unsigned long HauptantriebsZeit = 1; // Gesamt Hauptantriebszeit in Millisekunden
+  unsigned long Hauptantriebtakt = 1; // Taktzeit in Millisekunden
   int Pumpepuffer = 0;
   int RLAVentil = 0;
   int ext = 1;
@@ -279,14 +280,20 @@ void readCTRLMSGFrame(unsigned char* anData, unsigned long currentMillis) {
   Kessel.KeineStoerung = getbit(anData, 3, 0);
   Kessel.Drehrost = getbit(anData, 3, 6);
   Kessel.Reinigung = getbit(anData, 3, 7);
-  Kessel.Raumaustragung = getbit(anData, 9, 2);
+  Kessel.Raumaustragung = getbit(anData, 9, 2) || getbit(anData, 9, 5); // Schnecke || Saugturbine
   Kessel.Hauptantriebtakt = getval2(anData, 10, 2, 10, 0);
   Kessel.Hauptantrieb = getval2(anData, 12, 2, 10, 0);
   Kessel.Zuendung = getbit(anData, 16, 2);
+  if(getbit(anData, 4, 3) == 1)
+    Kessel.DrehungSaugschlauch = -1;
+  else if (getbit(anData, 4, 1) == 1)
+    Kessel.DrehungSaugschlauch = 1;
+  else
+    Kessel.DrehungSaugschlauch = 0;
 
   // Hauptantrieb Range:  0 .. Kessel.Hauptantriebtakt
   if (oKessel.Hauptantriebtakt != 0 )
-    Kessel.Hauptantriebzeit += (oKessel.Hauptantrieb * (currentMillis - timerHauptantrieb)) / (oKessel.Hauptantriebtakt);
+    Kessel.HauptantriebsZeit += (oKessel.Hauptantrieb * (currentMillis - timerHauptantrieb)) / (oKessel.Hauptantriebtakt);
 
   timerHauptantrieb = currentMillis;
   oKessel.Hauptantrieb = Kessel.Hauptantrieb;
@@ -300,16 +307,16 @@ void readCTRLMSGFrame(unsigned char* anData, unsigned long currentMillis) {
   Kessel.kwh += Kessel.Leistung * deltat;
   kwhtimer = currentMillis;
 
-  // Raumaustragung = SchneckeBunker
-  if ((Kessel.Raumaustragung == 0) && (oKessel.Raumaustragung == 1)) {
-    Kessel.Schneckenlaufzeit = (currentMillis - timerschnecke) / 1000;
-    if (Kessel.Schneckenlaufzeit > 800) Kessel.Schneckenlaufzeit = 0;
-    Kessel.Schneckengesamtlaufzeit += Kessel.Schneckenlaufzeit;
+  // Raumaustragung = SchneckenBunker or Saugturbine
+  if (Kessel.Raumaustragung != oKessel.Raumaustragung) {
+    if (Kessel.Raumaustragung == 0) { // switched off
+      Kessel.Austragungslaufzeit = (currentMillis - austragungStartedAtMillis) / 1000;
+      if (Kessel.Austragungslaufzeit > 800) Kessel.Austragungslaufzeit = 0; // >800s ???
+      Kessel.AustragungsGesamtLaufzeit += Kessel.Austragungslaufzeit;
+    } else { // switched on
+        austragungStartedAtMillis = currentMillis;
+    }
   }
-  if ((Kessel.Raumaustragung == 1) && (oKessel.Raumaustragung == 0))
-    timerschnecke = currentMillis;
-  if ((Kessel.Raumaustragung == 0) && (oKessel.Raumaustragung == 0))
-    Kessel.Schneckenlaufzeit = 0;
 }
 
 void readSenseMSGFrame(unsigned char* anData, unsigned long currentMillis) {
@@ -349,9 +356,9 @@ void readSenseMSGFrame(unsigned char* anData, unsigned long currentMillis) {
   // Kessel.photo = ((int) (Kessel.photo + 255.0) * 100) >> 9; // Result range 6 to 74
 
   // zwei gleiche impulse, die vom akt. unterschiedlich sind
-  if ((Kessel.Hauptantriebimpuls == oKessel.Hauptantriebimpuls) && (Kessel.Hauptantriebimpuls != HAimp )) {
+  if ((Kessel.Hauptantriebimpuls == oKessel.Hauptantriebimpuls) && (Kessel.Hauptantriebimpuls != HauptantriebsImpuls )) {
     // Hauptantrieb läuft und produziert Impulse
-    HAimp = Kessel.Hauptantriebimpuls;
+    HauptantriebsImpuls = Kessel.Hauptantriebimpuls;
     Kessel.HauptantriebUD++; // vollst. Takte zählen
     oKessel.Hauptantriebimpuls = Kessel.Hauptantriebimpuls;
   } // Impulsende
@@ -360,10 +367,10 @@ void readSenseMSGFrame(unsigned char* anData, unsigned long currentMillis) {
 }
 
 void publishFastChangingValues() {
-  // if (Kessel.RLAVentil != oKessel.RLAVentil) {
-  //   debugLog(Kessel.RLAVentil, "%d", "kwb/rlaventil");
-  //   oKessel.RLAVentil = Kessel.RLAVentil;
-  // }
+  if (Kessel.RLAVentil != oKessel.RLAVentil) {
+    // debugLog(Kessel.RLAVentil, "%d", "kwb/rlaventil");
+    oKessel.RLAVentil = Kessel.RLAVentil;
+  }
   if (Kessel.Drehrost != oKessel.Drehrost) {
     kessel_drehrost.setState((Kessel.Drehrost == 0) ? false : true);
     oKessel.Drehrost = Kessel.Drehrost;
@@ -374,14 +381,9 @@ void publishFastChangingValues() {
     oKessel.photo = Kessel.photo;
   }
 
-  // Wenn die Schnecke stehen geblieben ist und vorher lief Schneckenaufzeitausgeben
   if  (Kessel.Raumaustragung != oKessel.Raumaustragung) {
     // debugLog(Kessel.Raumaustragung, "%d", "kwb/austragung");
     kessel_raumaustragung.setState((((int)(Kessel.Raumaustragung)) == 0) ? false : true);
-    if (Kessel.Raumaustragung == 0) { // live reporting Schneckenlaufzeitausgabe
-      // kessel_schneckenlaufzeit.setValue(Kessel.Schneckenlaufzeit); // HASensorNumber int
-      oKessel.Schneckenlaufzeit = Kessel.Schneckenlaufzeit;
-    }
     oKessel.Raumaustragung = Kessel.Raumaustragung;
   }
 
@@ -413,6 +415,7 @@ void publishSlowlyChangingValues() {
   kessel_ruecklauf.setValue(float(Kessel.Ruecklauf));
   kessel_temperatur.setValue(float(Kessel.Kesseltemperatur));
   kessel_rauchgas.setValue(float(Kessel.Rauchgastemperatur));
+  // debugLog(Kessel.Pumpepuffer, "%d", "kwb/pumpe");
   kessel_pumpe.setState((((int)(Kessel.Pumpepuffer)) == 0) ? false : true);
   kessel_geblaese.setValue(float(Kessel.Geblaese));
   kessel_saugzug.setValue(float(Kessel.Saugzug));
@@ -447,11 +450,6 @@ void publishSlowlyChangingValues() {
 }
 
 void otherStuff(unsigned long currentMillis) {
-  if (Kessel.Raumaustragung == 0) { // live reporting Schneckenlaufzeitausgabe
-    // kessel_schneckenlaufzeit.setValue(Kessel.Schneckenlaufzeit); // HASensorNumber int
-    oKessel.Schneckenlaufzeit = Kessel.Schneckenlaufzeit;
-  }
-
   // kessel_proztemperatur.setValue(float(Kessel.Proztemperatur)); // HASensorNumber %.1f
 
   // for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
@@ -459,10 +457,10 @@ void otherStuff(unsigned long currentMillis) {
   // }
 
   // kessel_hauptantriebud.setValue(Kessel.HauptantriebUD); // HASensorNumber int
-  // kessel_hauptantriebzeit.setValue(Kessel.Hauptantriebzeit); // HASensorNumber int
+  // kessel_HauptantriebsZeit.setValue(Kessel.HauptantriebsZeit); // HASensorNumber int
   // kessel_hauptantriebtakt.setValue(float(Kessel.Hauptantriebtakt / 1000.0)); // HASensorNumber %2.1f
-  // kessel_pellets.setValue((int) ((((double)Kessel.Hauptantriebzeit)*HAfaktor) / 1000)); // HASensorNumber int
-  // kessel_pelletsna.setValue((int) (((float)Kessel.Schneckengesamtlaufzeit * NAfaktor))); // HASensorNumber int
+  // kessel_pellets.setValue((int) ((((double)Kessel.HauptantriebsZeit)*Hauptantriebsfakter) / 1000)); // HASensorNumber int
+  // kessel_pelletsna.setValue((int) (((float)Kessel.AustragungsGesamtLaufzeit * Nebenantriebsfaktor))); // HASensorNumber int
 
   framecounter = 0;
   errorcounter = 0;
@@ -476,22 +474,22 @@ void otherStuff(unsigned long currentMillis) {
 
     d = (Kessel.HauptantriebUD - UD) * 3600 * 1000 / (currentMillis - timerd);
     // Besp   3.58 * 60 * 60    1000ms / 5000ms
-    p = (int) (HAfaktor * 60 * 60 * ( Kessel.Hauptantriebzeit - ZD) ) / (currentMillis - timerd) ;
+    p = (int) (Hauptantriebsfakter * 60 * 60 * ( Kessel.HauptantriebsZeit - ZD) ) / (currentMillis - timerd) ;
     // kessel_deltapelletsh.setValue(p); // HASensorNumber int
 
-    Kessel.Leistung = LEISTUNGKESSEL * TAKT100 * ((double) ( Kessel.Hauptantriebzeit - ZD)) / ((double) (currentMillis - timerd)) ;
+    Kessel.Leistung = LEISTUNGKESSEL * TAKT100 * ((double) ( Kessel.HauptantriebsZeit - ZD)) / ((double) (currentMillis - timerd)) ;
     // kessel_leistung.setValue(float(Kessel.Leistung)); // HASensorNumber %2.1f
 
     // if (Kessel.Leistung < 1.0 )
     //   kessel_deltapelletsh.setValue(0); // HASensorNumber int
 
     // Verbrauch pro Stunde gemessen über NA
-    // kessel_deltapelletnsh.setValue((int) ((float)(Kessel.Schneckengesamtlaufzeit - SL) * NAfaktor * 1000.0 * 3600.0 / ( currentMillis - timerd))); // HASensorNumber int
+    // kessel_deltapelletnsh.setValue((int) ((float)(Kessel.AustragungsGesamtLaufzeit - AustragungsGesamtLaufzeit) * Nebenantriebsfaktor * 1000.0 * 3600.0 / ( currentMillis - timerd))); // HASensorNumber int
 
-    SL = Kessel.Schneckengesamtlaufzeit;
+    AustragungsGesamtLaufzeit = Kessel.AustragungsGesamtLaufzeit;
     UD = Kessel.HauptantriebUD;
     // kessel_deltat.setValue((millis() - timerd) / 1000); // HASensorNumber int
-    ZD = Kessel.Hauptantriebzeit;
+    ZD = Kessel.HauptantriebsZeit;
     timerd = currentMillis;
   }
 
@@ -502,15 +500,15 @@ void otherStuff(unsigned long currentMillis) {
     HANAtimer = currentMillis;
     double v;
 
-    if ((Kessel.Hauptantriebzeit - HAz) && (Kessel.Schneckengesamtlaufzeit - NAz)) { // Wenn der HA lief
-      v = (float) (Kessel.Hauptantriebzeit - HAz) / ((float)(Kessel.Schneckengesamtlaufzeit - NAz) * 1000.0  ) ;
+    if ((Kessel.HauptantriebsZeit - HauptantriebsZeit) && (Kessel.AustragungsGesamtLaufzeit - NebenantriebsZeit)) { // Wenn der Hauptantrieb lief
+      v = (float) (Kessel.HauptantriebsZeit - HauptantriebsZeit) / ((float)(Kessel.AustragungsGesamtLaufzeit - NebenantriebsZeit) * 1000.0  ) ;
       // kessel_hana.setValue(float(v)); // HASensorNumber %f
-      NAz = Kessel.Schneckengesamtlaufzeit;
-      HAz = Kessel.Hauptantriebzeit;
+      NebenantriebsZeit = Kessel.AustragungsGesamtLaufzeit;
+      HauptantriebsZeit = Kessel.HauptantriebsZeit;
     }
   }
 
-  oKessel.Schneckengesamtlaufzeit = Kessel.Schneckengesamtlaufzeit;
+  oKessel.AustragungsGesamtLaufzeit = Kessel.AustragungsGesamtLaufzeit;
   oKessel.Leistung = Kessel.Leistung;
 }
 
