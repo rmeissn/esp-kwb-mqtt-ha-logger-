@@ -129,6 +129,7 @@ HABinarySensor kessel_pumpe("kwb_kessel_pumpe");
 HABinarySensor kessel_raumaustragung("kwb_kessel_raumaustragung");
 HABinarySensor kessel_anforderung("kwb_kessel_anforderung");
 HABinarySensor kessel_stoerung("kwb_kessel_stoerung");
+HABinarySensor kessel_drehrost("kwb_kessel_drehrost");
 HASensor kessel("kwb_kessel");
 HASensorNumber kessel_photodiode("kwb_kessel_photodiode", HASensorNumber::PrecisionP0);
 HASensorNumber kessel_geblaese("kwb_kessel_geblaese", HASensorNumber::PrecisionP0);
@@ -235,6 +236,8 @@ void setup() {
   kessel_unterdruck.setName("Kessel Unterdruck");
   kessel_unterdruck.setDeviceClass("pressure");
   kessel_unterdruck.setUnitOfMeasurement("mbar");
+  kessel_drehrost.setIcon("mdi:grid");
+  kessel_drehrost.setName("Kessel Drehrost");
   // .setIcon("mdi:thermometer");
   // .setName("");
   // .setDeviceClass("temperature");
@@ -386,6 +389,10 @@ void loop() {
   }
 
   // publish some values directly, as they change
+  if (Kessel.Drehrost != oKessel.Drehrost) {
+    kessel_drehrost.setState((Kessel.Drehrost == 0) ? false : true);
+    oKessel.Drehrost = Kessel.Drehrost;
+  }
 
   if(abs(Kessel.photo - oKessel.photo) >= 5) {
     kessel_photodiode.setValue((int) Kessel.photo);
