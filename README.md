@@ -83,10 +83,19 @@ This code was created with ArduinoIDE (1.8.5) and is C++.
 * Removed debug MQTT code & replaced it with a simple function
 * Improved code styling (according to my taste)
 * Improved overall readability
-* Improved & added
+* Improved & added:
   * photodiode range now matching 0-100% (for my boiler)
   * boiler state also publishes "Neustart" and "Nachlauf" additionally to "Brennt" and "Aus"
+  * Raumaustragung now also measures a Saugzug, not just a Schnecke
 * Only publishing known values (not like Temp0-Temp19)
+
+## Todos
+
+* Some comments are still unclear
+* Translate everything to English
+* Some states don't seem to change (Anforderung, Zündung)
+* Add all remaining & known sensors & states
+* Rework code in function "otherStuff"
 
 ## Acknowledgements
 

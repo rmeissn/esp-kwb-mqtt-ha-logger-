@@ -76,7 +76,7 @@ unsigned long kwhtimer = 0; // Zeit seit letzer KW Messung
 struct ef2 {
   double kwh = 0.1;
   double Rauchgastemperatur = 0.0;
-  double Proztemperatur = 0.0;
+  double Proztemperatur = 0.0; // Prozessortemperatur? Temperatur der Steuerung?
   double Unterdruck = 0.0;
   double Brennerstunden = 0.0;
   double Kesseltemperatur = 0.0;
@@ -320,8 +320,11 @@ void readCTRLMSGFrame(unsigned char* anData, unsigned long currentMillis) {
 }
 
 void readSenseMSGFrame(unsigned char* anData, unsigned long currentMillis) {
+  // Zustände an Byte 3 und 4
   Kessel.Hauptantriebimpuls = getbit(anData, 3, 7);
   Kessel.ext = getbit(anData, 4, 7);
+  // Zustände an Byte5?
+  // Sensorwerte an folgenden Bytes (jeweils 2 lang)
   Kessel.HK1_Vorlauf = getval2(anData, 6, 2, 0.1, 1);
   Kessel.Ruecklauf = getval2(anData, 8, 2, 0.1, 1);
   Kessel.Boiler = getval2(anData, 10, 2, 0.1, 1);
@@ -337,6 +340,8 @@ void readSenseMSGFrame(unsigned char* anData, unsigned long currentMillis) {
   // see loop for 36 to 68
   Kessel.Saugzug = getval2(anData, 69, 2, 0.6, 0);
   Kessel.Geblaese = getval2(anData, 71, 2, 0.6, 0);
+  // see loop for 73 to 68
+  // what about byte area starting from 89?
 
   for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
     int s = i * 2 + 24; // 24 to 30
@@ -345,7 +350,6 @@ void readSenseMSGFrame(unsigned char* anData, unsigned long currentMillis) {
     else if (i >= 12) // unknown area between 52 to 68
       s = i * 2 + 49; // 73 to 87
     Kessel.Temp[i] = getval2(anData, s, 2, 0.1, 1);
-    // what about bit area starting from 89?
   }
 
   // Range photo -221 to 127 - 348 numbers
