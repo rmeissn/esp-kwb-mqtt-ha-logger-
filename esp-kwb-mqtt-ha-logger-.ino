@@ -357,31 +357,11 @@ void readSenseMSGFrame(unsigned char* anData, unsigned long currentMillis) {
   oKessel.Hauptantriebimpuls = Kessel.Hauptantriebimpuls;
 }
 
-//////////////////////////////////////////////////////////////////////////
-///////////////////// Main Loop //////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////
-void loop() {
-  mqtt.loop();
-  unsigned char anData[256];
-  int nDataLen;
-  int nID;
-  unsigned long currentMillis = 0;
-  int frameid, error;
-
-  // Read RS485 dataframe
-  int r = readframe(anData, nID, nDataLen, frameid, error);
-  // if (!r)
-  //   debugLog(nID, "Checksum error ID: %d", "kwb/error");
-
-  currentMillis = millis();
-
-  if (nID == 33) { // Control MSG  / Von Bediengerät an Kessel
-    readCTRLMSGFrame(anData, currentMillis);
-  } else if (nID == 32) { // Sense package
-    readSenseMSGFrame(anData, currentMillis);
-  }
-
-  // publish some values directly, as they change
+void publishFastChangingValues() {
+  // if (Kessel.RLAVentil != oKessel.RLAVentil) {
+  //   debugLog(Kessel.RLAVentil, "%d", "kwb/rlaventil");
+  //   oKessel.RLAVentil = Kessel.RLAVentil;
+  // }
   if (Kessel.Drehrost != oKessel.Drehrost) {
     kessel_drehrost.setState((Kessel.Drehrost == 0) ? false : true);
     oKessel.Drehrost = Kessel.Drehrost;
@@ -394,6 +374,7 @@ void loop() {
 
   // Wenn die Schnecke stehen geblieben ist und vorher lief Schneckenaufzeitausgeben
   if  (Kessel.Raumaustragung != oKessel.Raumaustragung) {
+    // debugLog(Kessel.Raumaustragung, "%d", "kwb/austragung");
     kessel_raumaustragung.setState((((int)(Kessel.Raumaustragung)) == 0) ? false : true);
     if (Kessel.Raumaustragung == 0) { // live reporting Schneckenlaufzeitausgabe
       // kessel_schneckenlaufzeit.setValue(Kessel.Schneckenlaufzeit); // HASensorNumber int
@@ -408,6 +389,7 @@ void loop() {
   }
 
   if (Kessel.Zuendung != oKessel.Zuendung)   {
+    // debugLog(Kessel.Zuendung, "%d", "kwb/zuendung");
     kessel_zuendung.setState((((int)(Kessel.Zuendung)) == 0) ? false : true);
     oKessel.Zuendung = Kessel.Zuendung;
   }
@@ -418,119 +400,155 @@ void loop() {
   //    oKessel.Temp[i] = Kessel.Temp[i];
   //  }
   // }
+}
 
-  //////////////////// timed update block (e.g. each minute) /////////////////////////////
+void publishSlowlyChangingValues() {
+  puffer_oben.setValue(float(Kessel.Puffer_oben));
+  puffer_unten.setValue(float(Kessel.Puffer_unten));
+  boiler.setValue(float(Kessel.Boiler));
+  heizkreis_vorlauf.setValue(float(Kessel.HK1_Vorlauf));
+  heizkreis_aussen.setValue(float(Kessel.HK1_aussen));
+  kessel_ruecklauf.setValue(float(Kessel.Ruecklauf));
+  kessel_temperatur.setValue(float(Kessel.Kesseltemperatur));
+  kessel_rauchgas.setValue(float(Kessel.Rauchgastemperatur));
+  kessel_reinigung.setState((((int)(Kessel.Reinigung)) == 0) ? false : true);
+  // debugLog(Kessel.Zuendung, "%d", "kwb/zuendung");
+  kessel_zuendung.setState((((int)(Kessel.Zuendung)) == 0) ? false : true);
+  // debugLog(Kessel.Pumpepuffer, "%d", "kwb/pumpe");
+  kessel_pumpe.setState((((int)(Kessel.Pumpepuffer)) == 0) ? false : true);
+  // debugLog(Kessel.Raumaustragung, "%d", "kwb/austragung");
+  kessel_raumaustragung.setState((((int)(Kessel.Raumaustragung)) == 0) ? false : true);
+  kessel_photodiode.setValue((int) Kessel.photo);
+  kessel_geblaese.setValue(float(Kessel.Geblaese));
+  kessel_saugzug.setValue(float(Kessel.Saugzug));
+
+  int oldStat = oKessel.Kesselstatus;
+  if(Kessel.photo < 20 && Kessel.Geblaese < 300 ) {
+    kessel.setValue("Aus");
+    Kessel.Kesselstatus = 0;
+  } else if(Kessel.photo >= 20 && Kessel.photo < 60 && Kessel.Geblaese > 2200 ) {
+    if(oldStat == 0) {
+      kessel.setValue("Neustart");
+      Kessel.Kesselstatus = 1;
+    } else if(oldStat == 2) {
+      kessel.setValue("Nachlauf");
+      Kessel.Kesselstatus = 3;
+    }
+  } else if(Kessel.photo >= 60 && Kessel.Geblaese >= 300 && Kessel.Geblaese <= 2200 ) {
+    // enable to jump to 2 if logger was just started and bioler is currently burning
+    if((Kessel.Kesselstatus == 0  && oldStat == 0) || (oldStat == 1 || oldStat == 3)){
+      kessel.setValue("Brennt");
+      Kessel.Kesselstatus = 2;
+    }
+  }
+
+  // debugLog(Kessel.ext, "%d", "kwb/anforderung");
+  kessel_anforderung.setState((((int)(Kessel.ext)) == 0) ? false : true);
+  kessel_energie.setValue(float(Kessel.kwh));
+  // debugLog(Kessel.KeineStoerung, "%d", "kwb/stoerung");
+  kessel_stoerung.setState((1 - ((int)(Kessel.KeineStoerung)) == 0) ? false : true);
+  kessel_brennerstunden.setValue(float(Kessel.Brennerstunden));
+  kessel_unterdruck.setValue(float(Kessel.Unterdruck));
+}
+
+void otherStuff(unsigned long currentMillis) {
+  if (Kessel.Raumaustragung == 0) { // live reporting Schneckenlaufzeitausgabe
+    // kessel_schneckenlaufzeit.setValue(Kessel.Schneckenlaufzeit); // HASensorNumber int
+    oKessel.Schneckenlaufzeit = Kessel.Schneckenlaufzeit;
+  }
+
+  // kessel_proztemperatur.setValue(float(Kessel.Proztemperatur)); // HASensorNumber %.1f
+
+  // for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
+  //   debugLog(Kessel.Temp[i], "%d", "kwb/temp" + i);
+  // }
+
+  // kessel_hauptantriebud.setValue(Kessel.HauptantriebUD); // HASensorNumber int
+  // kessel_hauptantriebzeit.setValue(Kessel.Hauptantriebzeit); // HASensorNumber int
+  // kessel_hauptantriebtakt.setValue(float(Kessel.Hauptantriebtakt / 1000.0)); // HASensorNumber %2.1f
+  // kessel_pellets.setValue((int) ((((double)Kessel.Hauptantriebzeit)*HAfaktor) / 1000)); // HASensorNumber int
+  // kessel_pelletsna.setValue((int) (((float)Kessel.Schneckengesamtlaufzeit * NAfaktor))); // HASensorNumber int
+
+  framecounter = 0;
+  errorcounter = 0;
+
+  // debugLog(framecounter, "%d", "kwb/frames");
+  // debugLog(errorcounter, "%d", "kwb/errors");
+
+  // akt Verbrauch berechnen
+  if (Kessel.HauptantriebUD - UD) {
+    int d, p;
+
+    d = (Kessel.HauptantriebUD - UD) * 3600 * 1000 / (currentMillis - timerd);
+    // Besp   3.58 * 60 * 60    1000ms / 5000ms
+    p = (int) (HAfaktor * 60 * 60 * ( Kessel.Hauptantriebzeit - ZD) ) / (currentMillis - timerd) ;
+    // kessel_deltapelletsh.setValue(p); // HASensorNumber int
+
+    Kessel.Leistung = LEISTUNGKESSEL * TAKT100 * ((double) ( Kessel.Hauptantriebzeit - ZD)) / ((double) (currentMillis - timerd)) ;
+    // kessel_leistung.setValue(float(Kessel.Leistung)); // HASensorNumber %2.1f
+
+    // if (Kessel.Leistung < 1.0 )
+    //   kessel_deltapelletsh.setValue(0); // HASensorNumber int
+
+    // Verbrauch pro Stunde gemessen über NA
+    // kessel_deltapelletnsh.setValue((int) ((float)(Kessel.Schneckengesamtlaufzeit - SL) * NAfaktor * 1000.0 * 3600.0 / ( currentMillis - timerd))); // HASensorNumber int
+
+    SL = Kessel.Schneckengesamtlaufzeit;
+    UD = Kessel.HauptantriebUD;
+    // kessel_deltat.setValue((millis() - timerd) / 1000); // HASensorNumber int
+    ZD = Kessel.Hauptantriebzeit;
+    timerd = currentMillis;
+  }
+
+  //////////////////////////////////////////////
+  // Berechnung HA/NA Verhältnis
+  // Alle xx Min  berechnen (-> ca. 1.9 wenn der sinkt gibt es Förderprobleme)
+  if (currentMillis > ( HANAtimer + 30 * 60  * 1000)) {
+    HANAtimer = currentMillis;
+    double v;
+
+    if ((Kessel.Hauptantriebzeit - HAz) && (Kessel.Schneckengesamtlaufzeit - NAz)) { // Wenn der HA lief
+      v = (float) (Kessel.Hauptantriebzeit - HAz) / ((float)(Kessel.Schneckengesamtlaufzeit - NAz) * 1000.0  ) ;
+      // kessel_hana.setValue(float(v)); // HASensorNumber %f
+      NAz = Kessel.Schneckengesamtlaufzeit;
+      HAz = Kessel.Hauptantriebzeit;
+    }
+  }
+
+  oKessel.Schneckengesamtlaufzeit = Kessel.Schneckengesamtlaufzeit;
+  oKessel.Leistung = Kessel.Leistung;
+}
+
+//////////////////////////////////////////////////////////////////////////
+///////////////////// Main Loop //////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////
+void loop() {
+  mqtt.loop();
+  unsigned char anData[256];
+  int nDataLen, nID, frameid, error;
+
+  // Read RS485 dataframe
+  int r = readframe(anData, nID, nDataLen, frameid, error);
+  // if (!r)
+  //   debugLog(nID, "Checksum error ID: %d", "kwb/error");
+
+  unsigned long currentMillis = millis();
+
+  if (nID == 33) { // Control MSG  (from operating unit to boiler)
+    readCTRLMSGFrame(anData, currentMillis);
+  } else if (nID == 32) { // Sense package
+    readSenseMSGFrame(anData, currentMillis);
+  }
+
+  publishFastChangingValues();
+
+  //////////////////// timed update block (e.g. each minute) ////////////////////
   if (currentMillis > (lastUpdateCycleMillis + updateEveryMinutes * 60 * 1000)) {
 
     bytecounter = 0;
 
-    puffer_oben.setValue(float(Kessel.Puffer_oben));
-    puffer_unten.setValue(float(Kessel.Puffer_unten));
-    boiler.setValue(float(Kessel.Boiler));
-    heizkreis_vorlauf.setValue(float(Kessel.HK1_Vorlauf));
-    heizkreis_aussen.setValue(float(Kessel.HK1_aussen));
-    kessel_ruecklauf.setValue(float(Kessel.Ruecklauf));
-    kessel_temperatur.setValue(float(Kessel.Kesseltemperatur));
-    kessel_rauchgas.setValue(float(Kessel.Rauchgastemperatur));
-    kessel_reinigung.setState((((int)(Kessel.Reinigung)) == 0) ? false : true);
-    kessel_zuendung.setState((((int)(Kessel.Zuendung)) == 0) ? false : true);
-    kessel_pumpe.setState((((int)(Kessel.Pumpepuffer)) == 0) ? false : true);
-    kessel_raumaustragung.setState((((int)(Kessel.Raumaustragung)) == 0) ? false : true);
-    kessel_photodiode.setValue((int) Kessel.photo);
-    kessel_geblaese.setValue(float(Kessel.Geblaese));
-    kessel_saugzug.setValue(float(Kessel.Saugzug));
-
-    int oldStat = oKessel.Kesselstatus;
-    if(Kessel.photo < 20 && Kessel.Geblaese < 300 ) {
-      kessel.setValue("Aus");
-      Kessel.Kesselstatus = 0;
-    } else if(Kessel.photo >= 20 && Kessel.photo < 60 && Kessel.Geblaese > 2200 ) {
-      if(oldStat == 0) {
-        kessel.setValue("Neustart");
-        Kessel.Kesselstatus = 1;
-      } else if(oldStat == 2) {
-        kessel.setValue("Nachlauf");
-        Kessel.Kesselstatus = 3;
-      }
-    } else if(Kessel.photo >= 60 && Kessel.Geblaese >= 300 && Kessel.Geblaese <= 2200 ) {
-      // enable to jump to 2 if logger was just started and bioler is currently burning
-      if((Kessel.Kesselstatus == 0  && oldStat == 0) || (oldStat == 1 || oldStat == 3)){
-        kessel.setValue("Brennt");
-        Kessel.Kesselstatus = 2;
-      }
-    }
-
-    kessel_anforderung.setState((((int)(Kessel.ext)) == 0) ? false : true);
-    kessel_energie.setValue(float(Kessel.kwh));
-    kessel_stoerung.setState((1 - ((int)(Kessel.KeineStoerung)) == 0) ? false : true);
-    kessel_brennerstunden.setValue(float(Kessel.Brennerstunden));
-    kessel_unterdruck.setValue(float(Kessel.Unterdruck));
-
-    if (Kessel.Raumaustragung == 0) { // live reporting Schneckenlaufzeitausgabe
-      // kessel_schneckenlaufzeit.setValue(Kessel.Schneckenlaufzeit); // HASensorNumber int
-      oKessel.Schneckenlaufzeit = Kessel.Schneckenlaufzeit;
-    }
-
-    // kessel_proztemperatur.setValue(float(Kessel.Proztemperatur)); // HASensorNumber %.1f
-
-    // for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
-    //   debugLog(Kessel.Temp[i], "%d", "kwb/temp" + i);
-    // }
-
-    // kessel_hauptantriebud.setValue(Kessel.HauptantriebUD); // HASensorNumber int
-    // kessel_hauptantriebzeit.setValue(Kessel.Hauptantriebzeit); // HASensorNumber int
-    // kessel_hauptantriebtakt.setValue(float(Kessel.Hauptantriebtakt / 1000.0)); // HASensorNumber %2.1f
-    // kessel_pellets.setValue((int) ((((double)Kessel.Hauptantriebzeit)*HAfaktor) / 1000)); // HASensorNumber int
-    // kessel_pelletsna.setValue((int) (((float)Kessel.Schneckengesamtlaufzeit * NAfaktor))); // HASensorNumber int
-
-    framecounter = 0;
-    errorcounter = 0;
-
-    // debugLog(framecounter, "%d", "kwb/frames");
-    // debugLog(errorcounter, "%d", "kwb/errors");
-
-    // akt Verbrauch berechnen
-    if (Kessel.HauptantriebUD - UD) {
-      int d, p;
-
-      d = (Kessel.HauptantriebUD - UD) * 3600 * 1000 / (currentMillis - timerd);
-      // Besp   3.58 * 60 * 60    1000ms / 5000ms
-      p = (int) (HAfaktor * 60 * 60 * ( Kessel.Hauptantriebzeit - ZD) ) / (currentMillis - timerd) ;
-      // kessel_deltapelletsh.setValue(p); // HASensorNumber int
-
-      Kessel.Leistung = LEISTUNGKESSEL * TAKT100 * ((double) ( Kessel.Hauptantriebzeit - ZD)) / ((double) (currentMillis - timerd)) ;
-      // kessel_leistung.setValue(float(Kessel.Leistung)); // HASensorNumber %2.1f
-
-      // if (Kessel.Leistung < 1.0 )
-      //   kessel_deltapelletsh.setValue(0); // HASensorNumber int
-
-      // Verbrauch pro Stunde gemessen über NA
-      // kessel_deltapelletnsh.setValue((int) ((float)(Kessel.Schneckengesamtlaufzeit - SL) * NAfaktor * 1000.0 * 3600.0 / ( currentMillis - timerd))); // HASensorNumber int
-
-      SL = Kessel.Schneckengesamtlaufzeit;
-      UD = Kessel.HauptantriebUD;
-      // kessel_deltat.setValue((millis() - timerd) / 1000); // HASensorNumber int
-      ZD = Kessel.Hauptantriebzeit;
-      timerd = currentMillis;
-    }
-
-    //////////////////////////////////////////////
-    // Berechnung HA/NA Verhältnis
-    // Alle xx Min  berechnen (-> ca. 1.9 wenn der sinkt gibt es Förderprobleme)
-    if (currentMillis > ( HANAtimer + 30 * 60  * 1000)) {
-      HANAtimer = currentMillis;
-      double v;
-
-      if ((Kessel.Hauptantriebzeit - HAz) && (Kessel.Schneckengesamtlaufzeit - NAz)) { // Wenn der HA lief
-        v = (float) (Kessel.Hauptantriebzeit - HAz) / ((float)(Kessel.Schneckengesamtlaufzeit - NAz) * 1000.0  ) ;
-        // kessel_hana.setValue(float(v)); // HASensorNumber %f
-        NAz = Kessel.Schneckengesamtlaufzeit;
-        HAz = Kessel.Hauptantriebzeit;
-      }
-    }
-
-    oKessel.Schneckengesamtlaufzeit = Kessel.Schneckengesamtlaufzeit;
-    oKessel.Leistung = Kessel.Leistung;
+    publishSlowlyChangingValues();
+    otherStuff(currentMillis);
 
     memcpy(&oKessel, &Kessel, sizeof Kessel);
     lastUpdateCycleMillis = currentMillis;
