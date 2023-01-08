@@ -158,8 +158,8 @@ void setup() {
 
   Serial.begin(19200);
 
-  for (int r = 0; r < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); r++) {
-    Kessel.Temp[r] = 0.0;
+  for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
+    Kessel.Temp[i] = 0.0;
   }
 
   device.setName("KWB Steuerung");
@@ -271,6 +271,92 @@ void debugLog (double value, char* formatter, char* topic) {
   mqtt.publish(topic, msg);
 }
 
+void readCTRLMSGFrame(unsigned char* anData, unsigned long currentMillis) {
+  Kessel.RLAVentil = getbit(anData, 2, 3);
+  Kessel.Pumpepuffer = getbit(anData, 2, 7);
+  Kessel.KeineStoerung = getbit(anData, 3, 0);
+  Kessel.Drehrost = getbit(anData, 3, 6);
+  Kessel.Reinigung = getbit(anData, 3, 7);
+  Kessel.Raumaustragung = getbit(anData, 9, 2);
+  Kessel.Hauptantriebtakt = getval2(anData, 10, 2, 10, 0);
+  Kessel.Hauptantrieb = getval2(anData, 12, 2, 10, 0);
+  Kessel.Zuendung = getbit(anData, 16, 2);
+
+  // Hauptantrieb Range:  0 .. Kessel.Hauptantriebtakt
+  if (oKessel.Hauptantriebtakt != 0 )
+    Kessel.Hauptantriebzeit += (oKessel.Hauptantrieb * (currentMillis - timerHauptantrieb)) / (oKessel.Hauptantriebtakt);
+
+  timerHauptantrieb = currentMillis;
+  oKessel.Hauptantrieb = Kessel.Hauptantrieb;
+  oKessel.Hauptantriebtakt = Kessel.Hauptantriebtakt;
+
+  // sum kwh
+  double deltat = (currentMillis - kwhtimer) / (3600.0 * 1000.0); // in h
+
+  if (Kessel.Leistung > 1)
+    Kessel.Brennerstunden += deltat; // Wenn der Kessel läuft
+  Kessel.kwh += Kessel.Leistung * deltat;
+  kwhtimer = currentMillis;
+
+  // Raumaustragung = SchneckeBunker
+  if ((Kessel.Raumaustragung == 0) && (oKessel.Raumaustragung == 1)) {
+    Kessel.Schneckenlaufzeit = (currentMillis - timerschnecke) / 1000;
+    if (Kessel.Schneckenlaufzeit > 800) Kessel.Schneckenlaufzeit = 0;
+    Kessel.Schneckengesamtlaufzeit += Kessel.Schneckenlaufzeit;
+  }
+  if ((Kessel.Raumaustragung == 1) && (oKessel.Raumaustragung == 0))
+    timerschnecke = currentMillis;
+  if ((Kessel.Raumaustragung == 0) && (oKessel.Raumaustragung == 0))
+    Kessel.Schneckenlaufzeit = 0;
+}
+
+void readSenseMSGFrame(unsigned char* anData, unsigned long currentMillis) {
+  Kessel.Hauptantriebimpuls = getbit(anData, 3, 7);
+  Kessel.ext = getbit(anData, 4, 7);
+  Kessel.HK1_Vorlauf = getval2(anData, 6, 2, 0.1, 1);
+  Kessel.Ruecklauf = getval2(anData, 8, 2, 0.1, 1);
+  Kessel.Boiler = getval2(anData, 10, 2, 0.1, 1);
+  Kessel.Kesseltemperatur = getval2(anData, 12, 2, 0.1, 1);
+  Kessel.Puffer_unten = getval2(anData, 14, 2, 0.1, 1);
+  Kessel.Puffer_oben = getval2(anData, 16, 2, 0.1, 1);
+  Kessel.HK1_aussen = getval2(anData, 18, 2, 0.1, 1);
+  Kessel.Rauchgastemperatur = getval2(anData, 20, 2, 0.1, 1);
+  Kessel.Proztemperatur = getval2(anData, 22, 2, 0.1, 1);
+  // see loop for 24 to 31
+  Kessel.photo =  getval2(anData, 32, 2, 0.1, 1);
+  Kessel.Unterdruck = getval2(anData, 34, 2, 0.1, 1);
+  // see loop for 36 to 68
+  Kessel.Saugzug = getval2(anData, 69, 2, 0.6, 0);
+  Kessel.Geblaese = getval2(anData, 71, 2, 0.6, 0);
+
+  for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
+    int s = i * 2 + 24; // 24 to 30
+    if(i >= 4)
+      s = i * 2  + 28; // 36 to 50
+    else if (i >= 12) // unknown area between 52 to 68
+      s = i * 2 + 49; // 73 to 87
+    Kessel.Temp[i] = getval2(anData, s, 2, 0.1, 1);
+    // what about bit area starting from 89?
+  }
+
+  // Range photo -221 to 127 - 348 numbers
+  // x + 255 - offset to zero / range -> 0 to 1 * 100 -> range 0 to 100
+  Kessel.photo = round(((Kessel.photo + 221.0) / 348) * 100);
+  Kessel.photo = (Kessel.photo < 0) ? 0 : (Kessel.photo > 100) ? 100 : Kessel.photo;
+  // old way
+  // Kessel.photo = ((int) (Kessel.photo + 255.0) * 100) >> 9; // Result range 6 to 74
+
+  // zwei gleiche impulse, die vom akt. unterschiedlich sind
+  if ((Kessel.Hauptantriebimpuls == oKessel.Hauptantriebimpuls) && (Kessel.Hauptantriebimpuls != HAimp )) {
+    // Hauptantrieb läuft und produziert Impulse
+    HAimp = Kessel.Hauptantriebimpuls;
+    Kessel.HauptantriebUD++; // vollst. Takte zählen
+    oKessel.Hauptantriebimpuls = Kessel.Hauptantriebimpuls;
+  } // Impulsende
+
+  oKessel.Hauptantriebimpuls = Kessel.Hauptantriebimpuls;
+}
+
 //////////////////////////////////////////////////////////////////////////
 ///////////////////// Main Loop //////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////
@@ -279,113 +365,20 @@ void loop() {
   unsigned char anData[256];
   int nDataLen;
   int nID;
-  int i, r;
   unsigned long currentMillis = 0;
   int frameid, error;
 
   // Read RS485 dataframe
-  r = readframe(anData, nID, nDataLen, frameid, error);
+  int r = readframe(anData, nID, nDataLen, frameid, error);
   // if (!r)
   //   debugLog(nID, "Checksum error ID: %d", "kwb/error");
 
   currentMillis = millis();
 
-  // Control MSG  / Von Bediengerät an Kessel
-  if (nID == 33) {
-    Kessel.RLAVentil = getbit(anData, 2, 3);
-    Kessel.Pumpepuffer = getbit(anData, 2, 7);
-    Kessel.KeineStoerung = getbit(anData, 3, 0);
-    Kessel.Drehrost = getbit(anData, 3, 6);
-    Kessel.Reinigung = getbit(anData, 3, 7);
-    Kessel.Raumaustragung = getbit(anData, 9, 2);
-    Kessel.Hauptantriebtakt = getval2(anData, 10, 2, 10, 0);
-    Kessel.Hauptantrieb = getval2(anData, 12, 2, 10, 0);
-    Kessel.Zuendung = getbit(anData, 16, 2);
-
-    // Hauptantrieb Range:  0 .. Kessel.Hauptantriebtakt
-    if (oKessel.Hauptantriebtakt != 0 )
-      Kessel.Hauptantriebzeit += (oKessel.Hauptantrieb * (currentMillis - timerHauptantrieb)) / (oKessel.Hauptantriebtakt);
-
-    timerHauptantrieb = currentMillis;
-    oKessel.Hauptantrieb = Kessel.Hauptantrieb;
-    oKessel.Hauptantriebtakt = Kessel.Hauptantriebtakt;
-
-    // sum kwh
-    double deltat = (currentMillis - kwhtimer) / (3600.0 * 1000.0); // in h
-
-    if (Kessel.Leistung > 1)
-      Kessel.Brennerstunden += deltat; // Wenn der Kessel läuft
-    Kessel.kwh += Kessel.Leistung * deltat;
-    kwhtimer = currentMillis;
-
-    // Raumaustragung = SchneckeBunker
-    if ((Kessel.Raumaustragung == 0) && (oKessel.Raumaustragung == 1)) {
-      Kessel.Schneckenlaufzeit = (currentMillis - timerschnecke) / 1000;
-      if (Kessel.Schneckenlaufzeit > 800) Kessel.Schneckenlaufzeit = 0;
-      Kessel.Schneckengesamtlaufzeit += Kessel.Schneckenlaufzeit;
-    }
-    if ((Kessel.Raumaustragung == 1) && (oKessel.Raumaustragung == 0))
-      timerschnecke = currentMillis;
-    if ((Kessel.Raumaustragung == 0) && (oKessel.Raumaustragung == 0))
-      Kessel.Schneckenlaufzeit = 0;
-  }
-
-  // Sense package
-  if (nID == 32) {
-    Kessel.Hauptantriebimpuls = getbit(anData, 3, 7);
-    Kessel.ext = getbit(anData, 4, 7);
-    Kessel.HK1_Vorlauf = getval2(anData, 6, 2, 0.1, 1);
-    Kessel.Ruecklauf = getval2(anData, 8, 2, 0.1, 1);
-    Kessel.Boiler = getval2(anData, 10, 2, 0.1, 1);
-    Kessel.Kesseltemperatur = getval2(anData, 12, 2, 0.1, 1);
-    Kessel.Puffer_unten = getval2(anData, 14, 2, 0.1, 1);
-    Kessel.Puffer_oben = getval2(anData, 16, 2, 0.1, 1);
-    Kessel.HK1_aussen = getval2(anData, 18, 2, 0.1, 1);
-    Kessel.Rauchgastemperatur = getval2(anData, 20, 2, 0.1, 1);
-    Kessel.Proztemperatur = getval2(anData, 22, 2, 0.1, 1);
-    Kessel.Temp[0] = getval2(anData, 24, 2, 0.1, 1);
-    Kessel.Temp[1] = getval2(anData, 26, 2, 0.1, 1);
-    Kessel.Temp[2] = getval2(anData, 28, 2, 0.1, 1);
-    Kessel.Temp[3] = getval2(anData, 30, 2, 0.1, 1);
-    Kessel.photo =  getval2(anData, 32, 2, 0.1, 1);
-    Kessel.Unterdruck = getval2(anData, 34, 2, 0.1, 1);
-    Kessel.Temp[4] = getval2(anData, 36, 2, 0.1, 1);
-    Kessel.Temp[5] = getval2(anData, 38, 2, 0.1, 1);
-    Kessel.Temp[6] = getval2(anData, 40, 2, 0.1, 1);
-    Kessel.Temp[7] = getval2(anData, 42, 2, 0.1, 1);
-    Kessel.Temp[8] = getval2(anData, 44, 2, 0.1, 1);
-    Kessel.Temp[9] = getval2(anData, 46, 2, 0.1, 1);
-    Kessel.Temp[10] = getval2(anData, 48, 2, 0.1, 1);
-    Kessel.Temp[11] = getval2(anData, 50, 2, 0.1, 1);
-    //unbekanntes Bitfeld?
-    Kessel.Saugzug = getval2(anData, 69, 2, 0.6, 0);
-    Kessel.Geblaese = getval2(anData, 71, 2, 0.6, 0);
-    Kessel.Temp[12] = getval2(anData, 73, 2, 0.1, 1);
-    Kessel.Temp[13] = getval2(anData, 75, 2, 0.1, 1);
-    Kessel.Temp[14] = getval2(anData, 77, 2, 0.1, 1);
-    Kessel.Temp[15] = getval2(anData, 79, 2, 0.1, 1);
-    Kessel.Temp[16] = getval2(anData, 81, 2, 0.1, 1);
-    Kessel.Temp[17] = getval2(anData, 83, 2, 0.1, 1);
-    Kessel.Temp[18] = getval2(anData, 85, 2, 0.1, 1);
-    Kessel.Temp[19] = getval2(anData, 87, 2, 0.1, 1);
-    //Bitfeld 89?
-
-    // Range photo -221 to 127 - 348 numbers
-    // x + 255 - offset to zero / range -> 0 to 1 * 100 -> range 0 to 100
-    Kessel.photo = round(((Kessel.photo + 221.0) / 348) * 100);
-    Kessel.photo = (Kessel.photo < 0) ? 0 : (Kessel.photo > 100) ? 100 : Kessel.photo;
-    // old way
-    // Kessel.photo = ((int) (Kessel.photo + 255.0) * 100) >> 9; // Result range 6 to 74
-
-    // zwei gleiche impulse, die vom akt. unterschiedlich sind
-    if ((Kessel.Hauptantriebimpuls == oKessel.Hauptantriebimpuls) && (Kessel.Hauptantriebimpuls != HAimp )) {
-      // Hauptantrieb läuft und produziert Impulse
-      HAimp = Kessel.Hauptantriebimpuls;
-      Kessel.HauptantriebUD++; // vollst. Takte zählen
-      oKessel.Hauptantriebimpuls = Kessel.Hauptantriebimpuls;
-    } // Impulsende
-
-    oKessel.Hauptantriebimpuls = Kessel.Hauptantriebimpuls;
+  if (nID == 33) { // Control MSG  / Von Bediengerät an Kessel
+    readCTRLMSGFrame(anData, currentMillis);
+  } else if (nID == 32) { // Sense package
+    readSenseMSGFrame(anData, currentMillis);
   }
 
   // publish some values directly, as they change
@@ -419,7 +412,7 @@ void loop() {
     oKessel.Zuendung = Kessel.Zuendung;
   }
 
-  // for (i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
+  // for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
   //  if (tempdiff(Kessel.Temp[i], oKessel.Temp[i], 0.4)) {
   //    debugLog(Kessel.Temp[i], "%d", "kwb/temp" + i);
   //    oKessel.Temp[i] = Kessel.Temp[i];
@@ -480,7 +473,7 @@ void loop() {
 
     // kessel_proztemperatur.setValue(float(Kessel.Proztemperatur)); // HASensorNumber %.1f
 
-    // for (i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
+    // for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
     //   debugLog(Kessel.Temp[i], "%d", "kwb/temp" + i);
     // }
 
