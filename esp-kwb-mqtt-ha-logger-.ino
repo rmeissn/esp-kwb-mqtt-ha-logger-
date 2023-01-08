@@ -257,9 +257,21 @@ void setup() {
 //   return String(tmp);
 // }
 
-// bool tempdiff(double a, double b, double d) {
-//   return (abs(a - b) >= d);
+// bool tempdiff(double a, double b, double diff) {
+//   return (abs(a - b) >= diff);
 // }
+
+void debugLog (int value, char* formatter, char* topic) {
+  char msg[64];
+  sprintf(msg, formatter, value);
+  mqtt.publish(topic, msg);
+}
+
+void debugLog (double value, char* formatter, char* topic) {
+  char msg[64];
+  sprintf(msg, formatter, value);
+  mqtt.publish(topic, msg);
+}
 
 //////////////////////////////////////////////////////////////////////////
 ///////////////////// Main Loop //////////////////////////////////////////
