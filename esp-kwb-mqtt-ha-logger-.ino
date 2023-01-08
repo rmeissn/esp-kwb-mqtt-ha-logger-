@@ -18,6 +18,8 @@
 #define LEISTUNGKESSEL 22.0 // KW at 100 %
 #define TAKT100  (12.5 / 5.0) // Taktung bei 100% Leistung 5s Laufzeit auf 12.5 sek
 
+int updateEveryMinutes = 1;
+
 // End of individual values
 
 #include <ESP8266WiFi.h>
@@ -38,7 +40,7 @@
 
 // Globals
 
-int updateEveryMinutes = 1, HAimp = 0;
+int HAimp = 0;
 long UD = 0, ZD = 0, SL = 0; // Schneckenlaufzeit
 long NAz = 0, HAz = 0, HANAtimer = 0; // Timer zur Ausgabe der HANA Ratio
 
@@ -294,7 +296,7 @@ void readCTRLMSGFrame(unsigned char* anData, unsigned long currentMillis) {
   double deltat = (currentMillis - kwhtimer) / (3600.0 * 1000.0); // in h
 
   if (Kessel.Leistung > 1)
-    Kessel.Brennerstunden += deltat; // Wenn der Kessel läuft
+    Kessel.Brennerstunden += deltat; // if burning
   Kessel.kwh += Kessel.Leistung * deltat;
   kwhtimer = currentMillis;
 
@@ -523,9 +525,10 @@ void otherStuff(unsigned long currentMillis) {
 ///////////////////// Main Loop //////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////
 void loop() {
-  mqtt.loop();
   unsigned char anData[256];
   int nDataLen, nID, frameid, error;
+
+  mqtt.loop();
 
   // Read RS485 dataframe
   int r = readframe(anData, nID, nDataLen, frameid, error);
