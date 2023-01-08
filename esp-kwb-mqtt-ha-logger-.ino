@@ -413,14 +413,7 @@ void publishSlowlyChangingValues() {
   kessel_ruecklauf.setValue(float(Kessel.Ruecklauf));
   kessel_temperatur.setValue(float(Kessel.Kesseltemperatur));
   kessel_rauchgas.setValue(float(Kessel.Rauchgastemperatur));
-  kessel_reinigung.setState((((int)(Kessel.Reinigung)) == 0) ? false : true);
-  // debugLog(Kessel.Zuendung, "%d", "kwb/zuendung");
-  kessel_zuendung.setState((((int)(Kessel.Zuendung)) == 0) ? false : true);
-  // debugLog(Kessel.Pumpepuffer, "%d", "kwb/pumpe");
   kessel_pumpe.setState((((int)(Kessel.Pumpepuffer)) == 0) ? false : true);
-  // debugLog(Kessel.Raumaustragung, "%d", "kwb/austragung");
-  kessel_raumaustragung.setState((((int)(Kessel.Raumaustragung)) == 0) ? false : true);
-  kessel_photodiode.setValue((int) Kessel.photo);
   kessel_geblaese.setValue(float(Kessel.Geblaese));
   kessel_saugzug.setValue(float(Kessel.Saugzug));
 
