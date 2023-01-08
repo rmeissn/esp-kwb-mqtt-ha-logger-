@@ -1,12 +1,10 @@
-
-// Author windundsternne, Duetting and rmeissn
-// Das Programm liest Control und Sense Daten vom Bus
+// reads control and sense data from the rs485 bus
 // Hardware
 // Webmos d1 mini + MAX485 module
-// Stromversorgung über USB
-// Neben den Kesselwerten werden noch Brennerlaufzeit Gesamtenergie berechnet, mit der der Pelletverbrauch geschätzt werden kann (ca. 4.3kg/kwh bei einem EF2)
+// power supply via USB
+// Additionally to the read values, Brennerlaufzeit and Gesamtenergie are calculated, with which pellet consumption can be estimated (~4.3kg/kwh for an EF2)
 
-// Individualisierungen
+// Individual values
 // #define WIFISSID "SSID"
 // #define WIFIPW  "PW"
 // #define MQTTSERVER "IP"
@@ -17,10 +15,10 @@
   #include "conf.h"
 #endif
 
-#define LEISTUNGKESSEL 22.0 // KW bei 100 %
-#define TAKT100  (12.5 / 5.0)            // Taktung bei 100% Leistung 5s Laufzeit auf 12.5 sek
+#define LEISTUNGKESSEL 22.0 // KW at 100 %
+#define TAKT100  (12.5 / 5.0) // Taktung bei 100% Leistung 5s Laufzeit auf 12.5 sek
 
-// Ende Individualisierungen
+// End of individual values
 
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
@@ -38,12 +36,9 @@
 #define FALSE 0
 #define TRUE 1
 
-// const char* ssid = WIFISSID;
-// const char* password = WIFIPW;
-
 // Globals
 
-int updatemin = 1, HAimp = 0;
+int updateEveryMinutes = 1, HAimp = 0;
 long UD = 0, ZD = 0, SL = 0; // Schneckenlaufzeit
 long NAz = 0, HAz = 0, HANAtimer = 0; // Timer zur Ausgabe der HANA Ratio
 
@@ -71,7 +66,7 @@ double HAfaktor = (400.0 / 128.0) ; // 400g in 120sek. > 3.333 g/s
 unsigned long bytecount = 0;
 unsigned long waitcount = 0;
 unsigned long longwaitcount = 0;
-unsigned long timerd = 0, timer1 = 0;
+unsigned long timerd = 0, lastUpdateCycleMillis = 0;
 unsigned long timerschnecke = 0;
 unsigned long timerHauptantrieb = 0 ;
 unsigned long kwhtimer = 0; // Zeit seit letzer KW Messung
@@ -247,7 +242,7 @@ void setup() {
 
   mqtt.begin(MQTTSERVER, MQTTUSER, MQTTPASSWORD);
 
-  timer1 = millis();
+  lastUpdateCycleMillis = millis();
   timerd = millis();
 }
 
@@ -282,16 +277,15 @@ void loop() {
   int nDataLen;
   int nID;
   int i, r;
-  unsigned long milli = 0;
+  unsigned long currentMillis = 0;
   int frameid, error;
 
-  // Datenframe vom RS485 einlesen
+  // Read RS485 dataframe
   r = readframe(anData, nID, nDataLen, frameid, error);
-  if (!r) {
-    // sprintf(msg, "Checksum error ID: %d", nID);
-    // client.publish("kwb/error", msg);
-  }
-  milli = millis();
+  // if (!r)
+  //   debugLog(nID, "Checksum error ID: %d", "kwb/error");
+
+  currentMillis = millis();
 
   // Control MSG  / Von Bediengerät an Kessel
   if (nID == 33) {
@@ -307,33 +301,33 @@ void loop() {
 
     // Hauptantrieb Range:  0 .. Kessel.Hauptantriebtakt
     if (oKessel.Hauptantriebtakt != 0 )
-      Kessel.Hauptantriebzeit += (oKessel.Hauptantrieb * (milli - timerHauptantrieb)) / (oKessel.Hauptantriebtakt);
+      Kessel.Hauptantriebzeit += (oKessel.Hauptantrieb * (currentMillis - timerHauptantrieb)) / (oKessel.Hauptantriebtakt);
 
-    timerHauptantrieb = milli;
+    timerHauptantrieb = currentMillis;
     oKessel.Hauptantrieb = Kessel.Hauptantrieb;
     oKessel.Hauptantriebtakt = Kessel.Hauptantriebtakt;
 
-    // kwh summieren
-    double deltat = (milli - kwhtimer) / (3600.0 * 1000.0); // in h
+    // sum kwh
+    double deltat = (currentMillis - kwhtimer) / (3600.0 * 1000.0); // in h
 
     if (Kessel.Leistung > 1)
       Kessel.Brennerstunden += deltat; // Wenn der Kessel läuft
     Kessel.kwh += Kessel.Leistung * deltat;
-    kwhtimer = milli;
+    kwhtimer = currentMillis;
 
     // Raumaustragung = SchneckeBunker
     if ((Kessel.Raumaustragung == 0) && (oKessel.Raumaustragung == 1)) {
-      Kessel.Schneckenlaufzeit = (milli - timerschnecke) / 1000;
+      Kessel.Schneckenlaufzeit = (currentMillis - timerschnecke) / 1000;
       if (Kessel.Schneckenlaufzeit > 800) Kessel.Schneckenlaufzeit = 0;
       Kessel.Schneckengesamtlaufzeit += Kessel.Schneckenlaufzeit;
     }
     if ((Kessel.Raumaustragung == 1) && (oKessel.Raumaustragung == 0))
-      timerschnecke = milli;
+      timerschnecke = currentMillis;
     if ((Kessel.Raumaustragung == 0) && (oKessel.Raumaustragung == 0))
       Kessel.Schneckenlaufzeit = 0;
   }
 
-  // Sense Paket empfangen
+  // Sense package
   if (nID == 32) {
     Kessel.Hauptantriebimpuls = getbit(anData, 3, 7);
     Kessel.ext = getbit(anData, 4, 7);
@@ -389,9 +383,9 @@ void loop() {
     } // Impulsende
 
     oKessel.Hauptantriebimpuls = Kessel.Hauptantriebimpuls;
-  } // Ende Sense Paket auslesen
+  }
 
-  // manche Werte direkt ausgeben, wenn eine Änderung eintrifft
+  // publish some values directly, as they change
 
   if(abs(Kessel.photo - oKessel.photo) >= 5) {
     kessel_photodiode.setValue((int) Kessel.photo);
@@ -418,17 +412,15 @@ void loop() {
     oKessel.Zuendung = Kessel.Zuendung;
   }
 
-  //for (i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
+  // for (i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
   //  if (tempdiff(Kessel.Temp[i], oKessel.Temp[i], 0.4)) {
-  //    sprintf(msg, "kwb/Temp%d", i);
-  //    send_value(msg, Kessel.Temp[i]);
+  //    debugLog(Kessel.Temp[i], "%d", "kwb/temp" + i);
   //    oKessel.Temp[i] = Kessel.Temp[i];
   //  }
-  //}
+  // }
 
-  //////////////////// Feste Zeit Block (bspw. jede Minute) /////////////////////////////
-  // wenn timer1 abgelaufen
-  if (milli > (timer1 + updatemin * 60 * 1000)) {
+  //////////////////// timed update block (e.g. each minute) /////////////////////////////
+  if (currentMillis > (lastUpdateCycleMillis + updateEveryMinutes * 60 * 1000)) {
 
     bytecounter = 0;
 
@@ -482,8 +474,7 @@ void loop() {
     // kessel_proztemperatur.setValue(float(Kessel.Proztemperatur)); // HASensorNumber %.1f
 
     // for (i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
-    //   sprintf(msg, "kwb/Temp%d", i);
-    //   send_value(msg, Kessel.Temp[i]);
+    //   debugLog(Kessel.Temp[i], "%d", "kwb/temp" + i);
     // }
 
     // kessel_hauptantriebud.setValue(Kessel.HauptantriebUD); // HASensorNumber int
@@ -495,39 +486,39 @@ void loop() {
     framecounter = 0;
     errorcounter = 0;
 
-    // sprintf(msg, "%d / %d", framecounter, errorcounter);
-    // client.publish("kwb/frames/errors", msg);
+    // debugLog(framecounter, "%d", "kwb/frames");
+    // debugLog(errorcounter, "%d", "kwb/errors");
 
     // akt Verbrauch berechnen
     if (Kessel.HauptantriebUD - UD) {
       int d, p;
 
-      d = (Kessel.HauptantriebUD - UD) * 3600 * 1000 / (milli - timerd);
+      d = (Kessel.HauptantriebUD - UD) * 3600 * 1000 / (currentMillis - timerd);
       // Besp   3.58 * 60 * 60    1000ms / 5000ms
-      p = (int) (HAfaktor * 60 * 60 * ( Kessel.Hauptantriebzeit - ZD) ) / (milli - timerd) ;
+      p = (int) (HAfaktor * 60 * 60 * ( Kessel.Hauptantriebzeit - ZD) ) / (currentMillis - timerd) ;
       // kessel_deltapelletsh.setValue(p); // HASensorNumber int
 
-      Kessel.Leistung = LEISTUNGKESSEL * TAKT100 * ((double) ( Kessel.Hauptantriebzeit - ZD)) / ((double) (milli - timerd)) ;
+      Kessel.Leistung = LEISTUNGKESSEL * TAKT100 * ((double) ( Kessel.Hauptantriebzeit - ZD)) / ((double) (currentMillis - timerd)) ;
       // kessel_leistung.setValue(float(Kessel.Leistung)); // HASensorNumber %2.1f
 
       // if (Kessel.Leistung < 1.0 )
       //   kessel_deltapelletsh.setValue(0); // HASensorNumber int
 
       // Verbrauch pro Stunde gemessen über NA
-      // kessel_deltapelletnsh.setValue((int) ((float)(Kessel.Schneckengesamtlaufzeit - SL) * NAfaktor * 1000.0 * 3600.0 / ( milli - timerd))); // HASensorNumber int
+      // kessel_deltapelletnsh.setValue((int) ((float)(Kessel.Schneckengesamtlaufzeit - SL) * NAfaktor * 1000.0 * 3600.0 / ( currentMillis - timerd))); // HASensorNumber int
 
       SL = Kessel.Schneckengesamtlaufzeit;
       UD = Kessel.HauptantriebUD;
       // kessel_deltat.setValue((millis() - timerd) / 1000); // HASensorNumber int
       ZD = Kessel.Hauptantriebzeit;
-      timerd = milli;
+      timerd = currentMillis;
     }
 
     //////////////////////////////////////////////
     // Berechnung HA/NA Verhältnis
     // Alle xx Min  berechnen (-> ca. 1.9 wenn der sinkt gibt es Förderprobleme)
-    if (milli > ( HANAtimer + 30 * 60  * 1000)) {
-      HANAtimer = milli;
+    if (currentMillis > ( HANAtimer + 30 * 60  * 1000)) {
+      HANAtimer = currentMillis;
       double v;
 
       if ((Kessel.Hauptantriebzeit - HAz) && (Kessel.Schneckengesamtlaufzeit - NAz)) { // Wenn der HA lief
@@ -542,10 +533,9 @@ void loop() {
     oKessel.Leistung = Kessel.Leistung;
 
     memcpy(&oKessel, &Kessel, sizeof Kessel);
-
-    timer1 = milli;
+    lastUpdateCycleMillis = currentMillis;
   }
 
-  // Delay am Loopende damit SW Watchdog nicht auslöst
+  // delay at the end of the loop to not trigger the SW Watchdog
   delay(5);
 }
