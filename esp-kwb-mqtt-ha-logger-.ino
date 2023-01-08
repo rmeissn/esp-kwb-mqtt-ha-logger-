@@ -108,6 +108,7 @@ struct ef2 {
   double HK1_Vorlauf = 0.0;
   double Ruecklauf = 0.0;
   double Boiler = 0.0;
+  int Kesselstatus = 0; // 0 = Off, 1 = ignition, 2 = operation 3 = afterrun
   double Temp[20];
 };
 
@@ -431,16 +432,35 @@ void loop() {
     kessel_zuendung.setState((((int)(Kessel.Zuendung)) == 0) ? false : true);
     kessel_pumpe.setState((((int)(Kessel.Pumpepuffer)) == 0) ? false : true);
     kessel_raumaustragung.setState((((int)(Kessel.Raumaustragung)) == 0) ? false : true);
-    float geblaese = float(Kessel.Geblaese);
-    kessel_geblaese.setValue(geblaese);
     kessel_photodiode.setValue((int) Kessel.photo);
+    kessel_geblaese.setValue(float(Kessel.Geblaese));
     kessel_saugzug.setValue(float(Kessel.Saugzug));
-    int photodiode = (int) Kessel.photo;
 
-    if(photodiode > 95 && geblaese > 10 )
-      kessel.setValue("Brennt");
-    if(photodiode < 10 && geblaese == 0 )
+    int oldStat = oKessel.Kesselstatus;
+    if(Kessel.photo < 20 && Kessel.Geblaese < 300 ) {
       kessel.setValue("Aus");
+      Kessel.Kesselstatus = 0;
+    } else if(Kessel.photo >= 20 && Kessel.photo < 60 && Kessel.Geblaese > 2200 ) {
+      if(oldStat == 0) {
+        kessel.setValue("Neustart");
+        Kessel.Kesselstatus = 1;
+      } else if(oldStat == 2) {
+        kessel.setValue("Nachlauf");
+        Kessel.Kesselstatus = 3;
+      }
+    }
+    if(Kessel.photo >= 60 && Kessel.Geblaese >= 300 && Kessel.Geblaese <= 2200 ) {
+      // enable to jump to 2 if logger was just started and bioler is currently burning
+      if(Kessel.Kesselstatus == 0  && oldStat == 0){
+        Kessel.Kesselstatus = 2;
+        kessel.setValue("Brennt");
+      }
+      if(oldStat == 1 || oldStat == 3) {
+        kessel.setValue("Brennt");
+        Kessel.Kesselstatus = 2;
+      }
+    }
+
     kessel_anforderung.setState((((int)(Kessel.ext)) == 0) ? false : true);
     kessel_energie.setValue(float(Kessel.kwh));
     kessel_stoerung.setState((1 - ((int)(Kessel.KeineStoerung)) == 0) ? false : true);
