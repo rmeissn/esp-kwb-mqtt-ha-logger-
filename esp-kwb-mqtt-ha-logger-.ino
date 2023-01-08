@@ -460,14 +460,9 @@ void loop() {
         kessel.setValue("Nachlauf");
         Kessel.Kesselstatus = 3;
       }
-    }
-    if(Kessel.photo >= 60 && Kessel.Geblaese >= 300 && Kessel.Geblaese <= 2200 ) {
+    } else if(Kessel.photo >= 60 && Kessel.Geblaese >= 300 && Kessel.Geblaese <= 2200 ) {
       // enable to jump to 2 if logger was just started and bioler is currently burning
-      if(Kessel.Kesselstatus == 0  && oldStat == 0){
-        Kessel.Kesselstatus = 2;
-        kessel.setValue("Brennt");
-      }
-      if(oldStat == 1 || oldStat == 3) {
+      if((Kessel.Kesselstatus == 0  && oldStat == 0) || (oldStat == 1 || oldStat == 3)){
         kessel.setValue("Brennt");
         Kessel.Kesselstatus = 2;
       }
