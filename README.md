@@ -1,9 +1,9 @@
 # esp-kwb-mqtt-ha-logger
 ---
 
-ESP based data logger (MQTT & HomeAssistant) for KWB Easyfire 2 pellet boiler (and probably similar ones).
+ESP based data logger (to MQTT & HomeAssistant) for KWB Easyfire 2 pellet boiler (and probably similar ones)
 
-The idea is to read values from the RS485 bus, which connects KWB room devices (thermostats') to the boiler, and to publish read values to a MQTT broker, and eventually to HomeAssistant.
+The idea is to read values from the RS485 bus, which connects KWB room devices (thermostat) to the boiler, and to publish read values to a MQTT broker and eventually to HomeAssistant.
 
 Currently published values are:
 
@@ -21,7 +21,7 @@ Currently published values are:
 | Saugzug                     | RPM         | 1500 RPM |
 | Kessel Zündung              | Boolean     | Aus |
 | Raumaustragung              | Boolean     | Aus |
-| Störung                     | Boolean     | Aus |
+| Störung                     | Boolean     | An |
 | Wärmeanforderung            | Boolean     | Aus |
 | Reinigung                   | Boolean     | Aus |
 | Kesselpumpe                 | Boolean     | Aus |
@@ -35,7 +35,7 @@ HomeAssistant (or other software) allows to create graphs from these values, lik
 
 ![ftuigraph.png](./pictures/ftuigraph.png)
 
-Values are published on MQTT and the sonsers are discoverable according to the HomeAssistant logic. Listen to `homeassistant/sensor/#` on your MQTT broker to see discovery information and also where the actual data is published.
+Values are published over MQTT and the sonsers are discoverable according to the HomeAssistant logic (auto discovery by HomeAssistant). Listen to `homeassistant/sensor/#` on your MQTT broker to see discovery information and also where the actual data is published.
 
 ## My specific hardware:
 
@@ -53,11 +53,11 @@ VCC (5V) -------- VCC      B ---------- B
 GND ------------- GND - RE - DE
 ```
 
-I'm supplying my ESP from a USB power adapter and VCC and GND from the RS485 bus arn't used. I'm not entirely sure this is correct, but it works. @windundsterne suggested to use a TL7800 to convert the 24V or the bus to 5V for the ESP, so no usb power adapter is needed.
+I'm supplying my ESP from a USB power adapter. VCC and GND from the RS485 bus arn't used. I'm not entirely sure this is correct, but it works. @windundsterne suggested to use a TL7800 to convert the 24V of the bus to 5V for the ESP, so no usb power adapter is needed.
 
 I'm using a Wemos D1 mini and the serial UART. To flash the device, RX must be disconnected from the MAX485.
 
-You can still find some wiring schemes and pictures from @windundsterne within the pictures folder.
+You can find the original wiring scheme and some pictures from @windundsterne in the pictures folder.
 
 ## How to compile:
 
@@ -80,13 +80,18 @@ This code was created with ArduinoIDE (1.8.5) and is C++.
 * Removed MQTT publishing code and replaced it with Arduino HomeAssistant library (which includes MQTT)
 * Removed OTA capabilities (didn't worked for me)
 * Removed software serial code entirely (uart is used)
-* Removed debug MQTT code
+* Removed debug MQTT code & replaced it with a simple function
 * Improved code styling (according to my taste)
 * Improved overall readability
+* Improved & added
+  * photodiode range now matching 0-100% (for my boiler)
+  * boiler state also publishes "Neustart" and "Nachlauf" additionally to "Brennt" and "Aus"
 * Only publishing known values (not like Temp0-Temp19)
 
 ## Acknowledgements
 
 Many thanks to Dirk Abel for his reverse engineering of the KWB protocol: https://www.mikrocontroller.net/topic/274137
+
 Many thanks to @windundsterne for his inital program
+
 Many thanks to @Duetting for his additions (more values to report)
