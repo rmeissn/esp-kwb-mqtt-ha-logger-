@@ -12,11 +12,11 @@
 // #define MQTTPASSWORD "PW"
 
 #ifndef WIFISSID
-  #include "conf.h"
+#include "conf.h"
 #endif
 
-#define LEISTUNGKESSEL 22.0 // KW at 100 %
-#define TAKT100  (12.5 / 5.0) // Taktung bei 100% Leistung 5s Laufzeit auf 12.5 sek
+#define LEISTUNGKESSEL 22.0   // KW at 100 %
+#define TAKT100 (12.5 / 5.0)  // Taktung bei 100% Leistung 5s Laufzeit auf 12.5 sek
 
 int updateEveryMinutes = 1;
 
@@ -32,7 +32,7 @@ int updateEveryMinutes = 1;
 #include <math.h>
 
 #define STATE_WAIT_FOR_HEADER 1
-#define STATE_READ_MSG  2
+#define STATE_READ_MSG 2
 #define MSG_TYPE_CTRL 1
 #define MSG_TYPE_SENSE 2
 #define FALSE 0
@@ -42,7 +42,7 @@ int updateEveryMinutes = 1;
 
 int HauptantriebsImpuls = 0;
 long Umdrehungen = 0, ZD = 0, AustragungsGesamtLaufzeit = 0;
-long NebenantriebsZeit = 0, HauptantriebsZeit = 0, HANAtimer = 0; // Timer zur Ausgabe der Hauptantrieb/Nebenantrieb Ratio
+long NebenantriebsZeit = 0, HauptantriebsZeit = 0, HANAtimer = 0;  // Timer zur Ausgabe der Hauptantrieb/Nebenantrieb Ratio
 
 extern long bytecounter;
 extern long framecounter;
@@ -63,20 +63,20 @@ extern long errorcounter;
 // Nebenantrieb/Schnecke: 1990gr mit 373 s = 5.34 gr/s (passt)
 
 double Nebenantriebsfaktor = 5.4;
-double Hauptantriebsfakter = (400.0 / 128.0) ; // 400g in 120sek. > 3.333 g/s
+double Hauptantriebsfakter = (400.0 / 128.0);  // 400g in 120sek. > 3.333 g/s
 
 unsigned long bytecount = 0;
 unsigned long waitcount = 0;
 unsigned long longwaitcount = 0;
 unsigned long timerd = 0, lastUpdateCycleMillis = 0;
 unsigned long austragungStartedAtMillis = 0;
-unsigned long timerHauptantrieb = 0 ;
-unsigned long kwhtimer = 0; // Zeit seit letzer KW Messung
+unsigned long timerHauptantrieb = 0;
+unsigned long kwhtimer = 0;  // Zeit seit letzer KW Messung
 
 struct ef2 {
   double kwh = 0.1;
   double Rauchgastemperatur = 0.0;
-  double Proztemperatur = 0.0; // Prozessortemperatur? Temperatur der Steuerung?
+  double Proztemperatur = 0.0;  // Prozessortemperatur? Temperatur der Steuerung?
   double Unterdruck = 0.0;
   double Brennerstunden = 0.0;
   double Kesseltemperatur = 0.0;
@@ -90,12 +90,12 @@ struct ef2 {
   int AustragungsGesamtLaufzeit = 0;
   int KeineStoerung = 0;
   int Raumaustragung = 0;
-  int Hauptantriebimpuls = 0; // Impulszähler
-  int Hauptantrieb = 0 ;      // Hauptantrieb Motorlaufzeit in Millisekunden
-  int HauptantriebUmdrehungen = 0; // Umdrehungen Stoker
-  int DrehungSaugschlauch = 0; // -1 left, 0 off, 1 right
-  unsigned long HauptantriebsZeit = 1; // Gesamt Hauptantriebszeit in Millisekunden
-  unsigned long Hauptantriebtakt = 1; // Taktzeit in Millisekunden
+  int Hauptantriebimpuls = 0;           // Impulszähler
+  int Hauptantrieb = 0;                 // Hauptantrieb Motorlaufzeit in Millisekunden
+  int HauptantriebUmdrehungen = 0;      // Umdrehungen Stoker
+  int DrehungSaugschlauch = 0;          // -1 left, 0 off, 1 right
+  unsigned long HauptantriebsZeit = 1;  // Gesamt Hauptantriebszeit in Millisekunden
+  unsigned long Hauptantriebtakt = 1;   // Taktzeit in Millisekunden
   int Pumpepuffer = 0;
   int RLAVentil = 0;
   int ext = 1;
@@ -106,11 +106,11 @@ struct ef2 {
   double HK1_Vorlauf = 0.0;
   double Ruecklauf = 0.0;
   double Boiler = 0.0;
-  int Kesselstatus = 0; // 0 = Off, 1 = ignition, 2 = operation 3 = afterrun
+  int Kesselstatus = 0;  // 0 = Off, 1 = ignition, 2 = operation 3 = afterrun
   double Temp[20];
 };
 
-struct ef2 Kessel, oKessel; // akt. und "letzter" Kesselzustand
+struct ef2 Kessel, oKessel;  // akt. und "letzter" Kesselzustand
 
 #include "espinclude.h"
 
@@ -262,13 +262,13 @@ void setup() {
 //   return (abs(a - b) >= diff);
 // }
 
-void debugLog (int value, char* formatter, char* topic) {
+void debugLog(int value, char* formatter, char* topic) {
   char msg[64];
   sprintf(msg, formatter, value);
   mqtt.publish(topic, msg);
 }
 
-void debugLog (double value, char* formatter, char* topic) {
+void debugLog(double value, char* formatter, char* topic) {
   char msg[64];
   sprintf(msg, formatter, value);
   mqtt.publish(topic, msg);
@@ -280,11 +280,11 @@ void readCTRLMSGFrame(unsigned char* anData, unsigned long currentMillis) {
   Kessel.KeineStoerung = getbit(anData, 3, 0);
   Kessel.Drehrost = getbit(anData, 3, 6);
   Kessel.Reinigung = getbit(anData, 3, 7);
-  Kessel.Raumaustragung = getbit(anData, 9, 2) || getbit(anData, 9, 5); // Schnecke || Saugturbine
+  Kessel.Raumaustragung = getbit(anData, 9, 2) || getbit(anData, 9, 5);  // Schnecke || Saugturbine
   Kessel.Hauptantriebtakt = getval2(anData, 10, 2, 10, 0);
   Kessel.Hauptantrieb = getval2(anData, 12, 2, 10, 0);
   Kessel.Zuendung = getbit(anData, 16, 2);
-  if(getbit(anData, 4, 3) == 1)
+  if (getbit(anData, 4, 3) == 1)
     Kessel.DrehungSaugschlauch = -1;
   else if (getbit(anData, 4, 1) == 1)
     Kessel.DrehungSaugschlauch = 1;
@@ -292,7 +292,7 @@ void readCTRLMSGFrame(unsigned char* anData, unsigned long currentMillis) {
     Kessel.DrehungSaugschlauch = 0;
 
   // Hauptantrieb Range:  0 .. Kessel.Hauptantriebtakt
-  if (oKessel.Hauptantriebtakt != 0 )
+  if (oKessel.Hauptantriebtakt != 0)
     Kessel.HauptantriebsZeit += (oKessel.Hauptantrieb * (currentMillis - timerHauptantrieb)) / (oKessel.Hauptantriebtakt);
 
   timerHauptantrieb = currentMillis;
@@ -300,21 +300,21 @@ void readCTRLMSGFrame(unsigned char* anData, unsigned long currentMillis) {
   oKessel.Hauptantriebtakt = Kessel.Hauptantriebtakt;
 
   // sum kwh
-  double deltat = (currentMillis - kwhtimer) / (3600.0 * 1000.0); // in h
+  double deltat = (currentMillis - kwhtimer) / (3600.0 * 1000.0);  // in h
 
   if (Kessel.Leistung > 1)
-    Kessel.Brennerstunden += deltat; // if burning
+    Kessel.Brennerstunden += deltat;  // if burning
   Kessel.kwh += Kessel.Leistung * deltat;
   kwhtimer = currentMillis;
 
   // Raumaustragung = SchneckenBunker or Saugturbine
   if (Kessel.Raumaustragung != oKessel.Raumaustragung) {
-    if (Kessel.Raumaustragung == 0) { // switched off
+    if (Kessel.Raumaustragung == 0) {  // switched off
       Kessel.Austragungslaufzeit = (currentMillis - austragungStartedAtMillis) / 1000;
-      if (Kessel.Austragungslaufzeit > 800) Kessel.Austragungslaufzeit = 0; // >800s ???
+      if (Kessel.Austragungslaufzeit > 800) Kessel.Austragungslaufzeit = 0;  // >800s ???
       Kessel.AustragungsGesamtLaufzeit += Kessel.Austragungslaufzeit;
-    } else { // switched on
-        austragungStartedAtMillis = currentMillis;
+    } else {  // switched on
+      austragungStartedAtMillis = currentMillis;
     }
   }
 }
@@ -335,7 +335,7 @@ void readSenseMSGFrame(unsigned char* anData, unsigned long currentMillis) {
   Kessel.Rauchgastemperatur = getval2(anData, 20, 2, 0.1, 1);
   Kessel.Proztemperatur = getval2(anData, 22, 2, 0.1, 1);
   // see loop for 24 to 31
-  Kessel.photo =  getval2(anData, 32, 2, 0.1, 1);
+  Kessel.photo = getval2(anData, 32, 2, 0.1, 1);
   Kessel.Unterdruck = getval2(anData, 34, 2, 0.1, 1);
   // see loop for 36 to 68
   Kessel.Saugzug = getval2(anData, 69, 2, 0.6, 0);
@@ -344,11 +344,11 @@ void readSenseMSGFrame(unsigned char* anData, unsigned long currentMillis) {
   // what about byte area starting from 89?
 
   for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
-    int s = i * 2 + 24; // 24 to 30
-    if(i >= 4)
-      s = i * 2  + 28; // 36 to 50
-    else if (i >= 12) // unknown area between 52 to 68
-      s = i * 2 + 49; // 73 to 87
+    int s = i * 2 + 24;  // 24 to 30
+    if (i >= 4)
+      s = i * 2 + 28;  // 36 to 50
+    else if (i >= 12)  // unknown area between 52 to 68
+      s = i * 2 + 49;  // 73 to 87
     Kessel.Temp[i] = getval2(anData, s, 2, 0.1, 1);
   }
 
@@ -360,12 +360,12 @@ void readSenseMSGFrame(unsigned char* anData, unsigned long currentMillis) {
   // Kessel.photo = ((int) (Kessel.photo + 255.0) * 100) >> 9; // Result range 6 to 74
 
   // zwei gleiche impulse, die vom akt. unterschiedlich sind
-  if ((Kessel.Hauptantriebimpuls == oKessel.Hauptantriebimpuls) && (Kessel.Hauptantriebimpuls != HauptantriebsImpuls )) {
+  if ((Kessel.Hauptantriebimpuls == oKessel.Hauptantriebimpuls) && (Kessel.Hauptantriebimpuls != HauptantriebsImpuls)) {
     // Hauptantrieb läuft und produziert Impulse
     HauptantriebsImpuls = Kessel.Hauptantriebimpuls;
-    Kessel.HauptantriebUmdrehungen++; // vollst. Takte zählen
+    Kessel.HauptantriebUmdrehungen++;  // vollst. Takte zählen
     oKessel.Hauptantriebimpuls = Kessel.Hauptantriebimpuls;
-  } // Impulsende
+  }  // Impulsende
 
   oKessel.Hauptantriebimpuls = Kessel.Hauptantriebimpuls;
 }
@@ -381,7 +381,7 @@ void publishFastChangingValues() {
   }
 
   if (abs(Kessel.photo - oKessel.photo) >= 5) {
-    kessel_photodiode.setValue((int) Kessel.photo);
+    kessel_photodiode.setValue((int)Kessel.photo);
     oKessel.photo = Kessel.photo;
   }
 
@@ -396,8 +396,8 @@ void publishFastChangingValues() {
     oKessel.Reinigung = Kessel.Reinigung;
   }
 
-  if (Kessel.Zuendung != oKessel.Zuendung)   {
     // debugLog(Kessel.Zuendung, "%d", "kwb/zuendung");
+  if (Kessel.Zuendung != oKessel.Zuendung) {
     kessel_zuendung.setState((((int)(Kessel.Zuendung)) == 0) ? false : true);
     oKessel.Zuendung = Kessel.Zuendung;
   }
@@ -425,20 +425,20 @@ void publishSlowlyChangingValues() {
   kessel_saugzug.setValue(float(Kessel.Saugzug));
 
   int oldStat = oKessel.Kesselstatus;
-  if(Kessel.photo < 20 && Kessel.Geblaese < 300 ) {
+  if (Kessel.photo < 20 && Kessel.Geblaese < 300) {
     kessel.setValue("Aus");
     Kessel.Kesselstatus = 0;
-  } else if(Kessel.photo >= 20 && Kessel.photo < 60 && Kessel.Geblaese > 2200 ) {
-    if(oldStat == 0) {
+  } else if (Kessel.photo >= 20 && Kessel.photo < 60 && Kessel.Geblaese > 2200) {
+    if (oldStat == 0) {
       kessel.setValue("Neustart");
       Kessel.Kesselstatus = 1;
-    } else if(oldStat == 2) {
+    } else if (oldStat == 2) {
       kessel.setValue("Nachlauf");
       Kessel.Kesselstatus = 3;
     }
   } else if(Kessel.photo >= 60 && Kessel.Geblaese >= 300 && Kessel.Geblaese <= 2200 ) {
     // enable to jump to 2 if logger was just started and bioler is currently burning
-    if((Kessel.Kesselstatus == 0  && oldStat == 0) || (oldStat == 1 || oldStat == 3)){
+    if ((Kessel.Kesselstatus == 0 && oldStat == 0) || (oldStat == 1 || oldStat == 3)) {
       kessel.setValue("Brennt");
       Kessel.Kesselstatus = 2;
     }
@@ -478,10 +478,10 @@ void otherStuff(unsigned long currentMillis) {
 
     d = (Kessel.HauptantriebUmdrehungen - Umdrehungen) * 3600 * 1000 / (currentMillis - timerd);
     // Besp   3.58 * 60 * 60    1000ms / 5000ms
-    p = (int) (Hauptantriebsfakter * 60 * 60 * ( Kessel.HauptantriebsZeit - ZD) ) / (currentMillis - timerd) ;
+    p = (int)(Hauptantriebsfakter * 60 * 60 * (Kessel.HauptantriebsZeit - ZD)) / (currentMillis - timerd);
     // kessel_deltapelletsh.setValue(p); // HASensorNumber int
 
-    Kessel.Leistung = LEISTUNGKESSEL * TAKT100 * ((double) ( Kessel.HauptantriebsZeit - ZD)) / ((double) (currentMillis - timerd)) ;
+    Kessel.Leistung = LEISTUNGKESSEL * TAKT100 * ((double)(Kessel.HauptantriebsZeit - ZD)) / ((double)(currentMillis - timerd));
     // kessel_leistung.setValue(float(Kessel.Leistung)); // HASensorNumber %2.1f
 
     // if (Kessel.Leistung < 1.0 )
@@ -500,12 +500,12 @@ void otherStuff(unsigned long currentMillis) {
   //////////////////////////////////////////////
   // Berechnung HA/NA Verhältnis
   // Alle xx Min  berechnen (-> ca. 1.9 wenn der sinkt gibt es Förderprobleme)
-  if (currentMillis > ( HANAtimer + 30 * 60  * 1000)) {
+  if (currentMillis > (HANAtimer + 30 * 60 * 1000)) {
     HANAtimer = currentMillis;
     double v;
 
-    if ((Kessel.HauptantriebsZeit - HauptantriebsZeit) && (Kessel.AustragungsGesamtLaufzeit - NebenantriebsZeit)) { // Wenn der Hauptantrieb lief
-      v = (float) (Kessel.HauptantriebsZeit - HauptantriebsZeit) / ((float)(Kessel.AustragungsGesamtLaufzeit - NebenantriebsZeit) * 1000.0  ) ;
+    if ((Kessel.HauptantriebsZeit - HauptantriebsZeit) && (Kessel.AustragungsGesamtLaufzeit - NebenantriebsZeit)) {  // Wenn der Hauptantrieb lief
+      v = (float)(Kessel.HauptantriebsZeit - HauptantriebsZeit) / ((float)(Kessel.AustragungsGesamtLaufzeit - NebenantriebsZeit) * 1000.0);
       // kessel_hana.setValue(float(v)); // HASensorNumber %f
       NebenantriebsZeit = Kessel.AustragungsGesamtLaufzeit;
       HauptantriebsZeit = Kessel.HauptantriebsZeit;
@@ -532,9 +532,9 @@ void loop() {
 
   unsigned long currentMillis = millis();
 
-  if (nID == 33) { // Control MSG  (from operating unit to boiler)
+  if (nID == 33) {  // Control MSG  (from operating unit to boiler)
     readCTRLMSGFrame(anData, currentMillis);
-  } else if (nID == 32) { // Sense package
+  } else if (nID == 32) {  // Sense package
     readSenseMSGFrame(anData, currentMillis);
   }
 
