@@ -61,18 +61,19 @@ You can find the original wiring scheme and some pictures from @windundsterne in
 
 ## How to compile:
 
-This code was created with ArduinoIDE (1.8.5) and is C++.
+This code was created with ArduinoIDE (2.0.3) and is C++.
 
 1. Install Arduino IDE
 2. Open the program (as a sketch)
 3. Add ESP libraries (File - Preferences - Board Manager URL - https://arduino.esp8266.com/stable/package_esp8266com_index.json )
-4. Install needed libraries via Tools - Manage Libraries
+4. Install ESP8266 Boards via board manager
+5. Install needed libraries via Tools - Manage Libraries
   1. home-assistant-integration (v2.0.0)
   2. PubSubClient (v2.8.0)
-5. Select your ESP board via Tools - Board
-6. Rename conf.h.template to conf.h and fill in your values
-6. Compile
-7. flash
+6. Select your ESP board via Tools - Board
+7. Rename conf.h.template to conf.h and fill in your values
+8. Compile
+9. Flash/Upload
 
 The resulting device is OTA capable (via Arduino IDE) and the OTA process can be secured with a password.
 

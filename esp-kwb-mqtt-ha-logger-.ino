@@ -377,10 +377,11 @@ void readSenseMSGFrame(unsigned char* anData, unsigned long currentMillis) {
 }
 
 void publishFastChangingValues() {
-  if (Kessel.RLAVentil != oKessel.RLAVentil) {
-    // debugLog(Kessel.RLAVentil, "%d", "kwb/rlaventil");
-    oKessel.RLAVentil = Kessel.RLAVentil;
-  }
+  // if (Kessel.RLAVentil != oKessel.RLAVentil) {
+  //   debugLog(Kessel.RLAVentil, "%d", "kwb/rlaventil"); // 0/1 - actually the valve is able to turn left/right, so this might be either left or right and a second bit (0/1) is missing
+  //   oKessel.RLAVentil = Kessel.RLAVentil;
+  // }
+
   if (Kessel.Drehrost != oKessel.Drehrost) {
     kessel_drehrost.setState((Kessel.Drehrost == 0) ? false : true);
     oKessel.Drehrost = Kessel.Drehrost;
@@ -392,7 +393,6 @@ void publishFastChangingValues() {
   }
 
   if (Kessel.Raumaustragung != oKessel.Raumaustragung) {
-    // debugLog(Kessel.Raumaustragung, "%d", "kwb/austragung");
     kessel_raumaustragung.setState((((int)(Kessel.Raumaustragung)) == 0) ? false : true);
     oKessel.Raumaustragung = Kessel.Raumaustragung;
   }
