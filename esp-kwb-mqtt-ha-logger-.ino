@@ -10,6 +10,7 @@
 // #define MQTTSERVER "IP"
 // #define MQTTUSER "USERNAME"
 // #define MQTTPASSWORD "PW"
+// #define OTAPASSWORD "PW"
 
 #ifndef WIFISSID
 #include "conf.h"
@@ -160,6 +161,11 @@ void setup() {
   wifi_on();
 
   Serial.begin(19200);
+
+  ArduinoOTA.begin();
+  #ifdef OTAPASSWORD
+  ArduinoOTA.setPassword((const char*)OTAPASSWORD);
+  #endif
 
   for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
     Kessel.Temp[i] = 0.0;
@@ -524,6 +530,7 @@ void loop() {
   int nDataLen, nID, frameid, error;
 
   mqtt.loop();
+  ArduinoOTA.handle();
 
   // Read RS485 dataframe
   int r = readframe(anData, nID, nDataLen, frameid, error);
