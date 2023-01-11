@@ -131,7 +131,7 @@ HABinarySensor kessel_reinigung("kwb_kessel_reinigung");
 HABinarySensor kessel_zuendung("kwb_kessel_zuendung");
 HABinarySensor kessel_pumpe("kwb_kessel_pumpe");
 HABinarySensor kessel_raumaustragung("kwb_kessel_raumaustragung");
-HABinarySensor kessel_anforderung("kwb_kessel_anforderung");
+// HABinarySensor kessel_anforderung("kwb_kessel_anforderung");
 HABinarySensor kessel_stoerung("kwb_kessel_stoerung");
 HABinarySensor kessel_drehrost("kwb_kessel_drehrost");
 HASensor kessel("kwb_kessel");
@@ -230,8 +230,8 @@ void setup() {
   kessel_pumpe.setName("Kessel Pumpe");
   kessel_raumaustragung.setIcon("mdi:warehouse");
   kessel_raumaustragung.setName("Kessel Raumaustragung");
-  kessel_anforderung.setIcon("mdi:thermometer-plus");
-  kessel_anforderung.setName("Kessel Wärmeanforderung");
+  // kessel_anforderung.setIcon("mdi:thermometer-plus");
+  // kessel_anforderung.setName("Kessel Wärmeanforderung");
   kessel_stoerung.setIcon("mdi:exclamation-thick");
   kessel_stoerung.setName("Kessel Störung");
   kessel.setIcon("mdi:gas-burner");
@@ -463,7 +463,7 @@ void publishSlowlyChangingValues() {
   }
 
   // debugLog(Kessel.ext, "%d", "kwb/anforderung");
-  kessel_anforderung.setState((((int)(Kessel.ext)) == 0) ? false : true);
+  // kessel_anforderung.setState((((int)(Kessel.ext)) == 0) ? false : true);
   kessel_energie.setValue(float(Kessel.kwh));
   // debugLog(Kessel.KeineStoerung, "%d", "kwb/stoerung");
   kessel_stoerung.setState((Kessel.Stoerung == 0) ? false : true);
