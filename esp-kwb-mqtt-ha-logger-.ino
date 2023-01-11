@@ -142,6 +142,17 @@ HASensorNumber kessel_energie("kwb_kessel_energie", HASensorNumber::PrecisionP3)
 HASensorNumber kessel_brennerstunden("kwb_kessel_brennerstunden", HASensorNumber::PrecisionP3);
 HASensorNumber kessel_unterdruck("kwb_kessel_unterdruck", HASensorNumber::PrecisionP1);
 
+unsigned long wifiPreviousTime = 0;
+int wifiReconnectDelay = 5; //mins
+
+void wifiReconnectIfLost(unsigned long currentTime) {
+  if ((WiFi.status() != WL_CONNECTED) && (currentTime - wifiPreviousTime >= wifiReconnectDelay * 60 * 10)) {
+    WiFi.disconnect();
+    WiFi.reconnect();
+    wifiPreviousTime = currentTime;
+  }
+}
+
 void wifi_on() {
   byte mac[6];
 
@@ -149,11 +160,12 @@ void wifi_on() {
   device.setUniqueId(mac, sizeof(mac));
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFISSID, WIFIPW);
-  while (WiFi.waitForConnectResult() != WL_CONNECTED) {
+  if(WiFi.waitForConnectResult() != WL_CONNECTED) {
     // Serial.println("Connection Failed! Rebooting...");
     delay(5000);
     ESP.restart();
   }
+  wifiPreviousTime = millis();
 }
 
 ////////////////////// Setup //////////////////////////
@@ -557,6 +569,7 @@ void loop() {
 
     memcpy(&oKessel, &Kessel, sizeof Kessel);
     lastUpdateCycleMillis = currentMillis;
+    wifiReconnectIfLost(currentMillis);
   }
 
   // delay at the end of the loop to not trigger the SW Watchdog
