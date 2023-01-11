@@ -428,7 +428,7 @@ void publishFastChangingValues() {
   // }
 }
 
-void publishSlowlyChangingValues() {
+void publishSlowlyChangingValues(unsigned long currentMillis) {
   puffer_oben.setValue(float(Kessel.Puffer_oben));
   puffer_unten.setValue(float(Kessel.Puffer_unten));
   boiler.setValue(float(Kessel.Boiler));
@@ -443,23 +443,24 @@ void publishSlowlyChangingValues() {
   kessel_saugzug.setValue(float(Kessel.Saugzug));
 
   int oldStat = oKessel.Kesselstatus;
-  if (Kessel.photo < 20 && Kessel.Geblaese < 300) {
-    kessel.setValue("Aus");
-    Kessel.Kesselstatus = 0;
-  } else if (Kessel.photo >= 20 && Kessel.photo < 60 && Kessel.Geblaese > 2200) {
-    if (oldStat == 0) {
-      kessel.setValue("Neustart");
-      Kessel.Kesselstatus = 1;
-    } else if (oldStat == 2) {
-      kessel.setValue("Nachlauf");
-      Kessel.Kesselstatus = 3;
-    }
-  } else if(Kessel.photo >= 60 && Kessel.Geblaese >= 300 && Kessel.Geblaese <= 2200 ) {
-    // enable to jump to 2 if logger was just started and bioler is currently burning
-    if ((Kessel.Kesselstatus == 0 && oldStat == 0) || (oldStat == 1 || oldStat == 3)) {
+  if (oldStat == 0) { // Off
+    if(currentMillis <= 2 * 60 *1000 && (Kessel.photo >= 50 && Kessel.Rauchgastemperatur >= 70)) { // device just started - might be burning
       kessel.setValue("Brennt");
       Kessel.Kesselstatus = 2;
+    } else if (Kessel.Geblaese > 300){
+      kessel.setValue("Neustart");
+      Kessel.Kesselstatus = 1;
     }
+  } else if (oldStat == 1 && Kessel.Rauchgastemperatur > 75) { // Restarted & starts to burn
+    kessel.setValue("Brennt");
+    Kessel.Kesselstatus = 2;
+  } else if (oldStat == 2 && Kessel.photo < 50 && Kessel.Geblaese > 2200) { // Burned & expires
+    kessel.setValue("Nachlauf");
+    Kessel.Kesselstatus = 3;
+  }
+  if(Kessel.photo < 20 && Kessel.Geblaese < 300) { // turn off and emergency escape
+    kessel.setValue("Aus");
+    Kessel.Kesselstatus = 0;
   }
 
   // debugLog(Kessel.ext, "%d", "kwb/anforderung");
@@ -564,7 +565,7 @@ void loop() {
 
     bytecounter = 0;
 
-    publishSlowlyChangingValues();
+    publishSlowlyChangingValues(currentMillis);
     otherStuff(currentMillis);
 
     memcpy(&oKessel, &Kessel, sizeof Kessel);
