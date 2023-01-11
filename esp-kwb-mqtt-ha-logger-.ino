@@ -89,7 +89,7 @@ struct ef2 {
   int Drehrost = 0;
   int Austragungslaufzeit = 0;
   int AustragungsGesamtLaufzeit = 0;
-  int KeineStoerung = 0;
+  int Stoerung = 0;
   int Raumaustragung = 0;
   int Hauptantriebimpuls = 0;           // Impulszähler
   int Hauptantrieb = 0;                 // Hauptantrieb Motorlaufzeit in Millisekunden
@@ -295,7 +295,7 @@ void debugLog(double value, char* formatter, char* topic) {
 void readCTRLMSGFrame(unsigned char* anData, unsigned long currentMillis) {
   Kessel.RLAVentil = getbit(anData, 2, 3);
   Kessel.Pumpepuffer = getbit(anData, 2, 7);
-  Kessel.KeineStoerung = getbit(anData, 3, 0);
+  Kessel.Stoerung = 1 - getbit(anData, 3, 0);
   Kessel.Drehrost = getbit(anData, 3, 6);
   Kessel.Reinigung = getbit(anData, 3, 7);
   Kessel.Raumaustragung = getbit(anData, 9, 2) || getbit(anData, 9, 5);  // Schnecke || Saugturbine
@@ -466,7 +466,7 @@ void publishSlowlyChangingValues() {
   kessel_anforderung.setState((((int)(Kessel.ext)) == 0) ? false : true);
   kessel_energie.setValue(float(Kessel.kwh));
   // debugLog(Kessel.KeineStoerung, "%d", "kwb/stoerung");
-  kessel_stoerung.setState((1 - ((int)(Kessel.KeineStoerung)) == 0) ? false : true);
+  kessel_stoerung.setState((Kessel.Stoerung == 0) ? false : true);
   kessel_brennerstunden.setValue(float(Kessel.Brennerstunden));
   kessel_unterdruck.setValue(float(Kessel.Unterdruck));
 }
