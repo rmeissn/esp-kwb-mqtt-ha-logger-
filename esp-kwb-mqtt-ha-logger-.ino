@@ -20,6 +20,7 @@
 #define TAKT100 (12.5 / 5.0)  // Taktung bei 100% Leistung 5s Laufzeit auf 12.5 sek
 
 int updateEveryMinutes = 1;
+bool publishUnknown = false;
 
 // End of individual values
 
@@ -109,6 +110,9 @@ struct ef2 {
   double Boiler = 0.0;
   int Kesselstatus = 0;  // 0 = Off, 1 = ignition, 2 = operation 3 = afterrun
   double Temp[20];
+  String SenseByte1;
+  String SenseByte2;
+  String SenseByte3;
 };
 
 struct ef2 Kessel, oKessel;  // akt. und "letzter" Kesselzustand
@@ -276,9 +280,9 @@ void setup() {
 //   return String(tmp);
 // }
 
-// bool tempdiff(double a, double b, double diff) {
-//   return (abs(a - b) >= diff);
-// }
+bool tempdiff(double a, double b, double diff) {
+  return (abs(a - b) >= diff);
+}
 
 void debugLog(int value, char* formatter, char* topic) {
   char msg[64];
@@ -337,8 +341,25 @@ void readCTRLMSGFrame(unsigned char* anData, unsigned long currentMillis) {
   }
 }
 
+void publishByte(char* topic, String byte) {
+  char msg[64];
+  byte.toCharArray(msg, 8);
+  mqtt.publish(topic, msg);
+}
+
+String recordByte(int index, unsigned char* anData) {
+  String t = "";
+  for (int i = 0; i < 8; i++) {
+    t += getbit(anData, index, i);;
+  }
+  return t;
+}
+
 void readSenseMSGFrame(unsigned char* anData, unsigned long currentMillis) {
   // Zustände an Byte 3 und 4
+  Kessel.SenseByte1 = recordByte(3, anData);
+  Kessel.SenseByte2 = recordByte(4, anData);
+  Kessel.SenseByte3 = recordByte(5, anData);
   Kessel.Hauptantriebimpuls = getbit(anData, 3, 7);
   Kessel.ext = getbit(anData, 4, 7);
   // Zustände an Byte5?
@@ -393,6 +414,29 @@ void publishFastChangingValues() {
   //   debugLog(Kessel.RLAVentil, "%d", "kwb/rlaventil"); // 0/1 - actually the valve is able to turn left/right, so this might be either left or right and a second bit (0/1) is missing
   //   oKessel.RLAVentil = Kessel.RLAVentil;
   // }
+  if(publishUnknown) {
+    if(Kessel.SenseByte1 != oKessel.SenseByte1) {
+      publishByte("kwb/senseByte1", Kessel.SenseByte1);
+      oKessel.SenseByte1 = Kessel.SenseByte1;
+    }
+    if(Kessel.SenseByte2 != oKessel.SenseByte2) {
+      publishByte("kwb/senseByte2", Kessel.SenseByte2);
+      oKessel.SenseByte2 = Kessel.SenseByte2;
+    }
+    if(Kessel.SenseByte3 != oKessel.SenseByte3) {
+      publishByte("kwb/senseByte3", Kessel.SenseByte3);
+      oKessel.SenseByte3 = Kessel.SenseByte3;
+    }
+    for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
+      if (tempdiff(Kessel.Temp[i], oKessel.Temp[i], 0.4)) {
+        String name = "kwb/temp" + i;
+        char buf[64];
+        name.toCharArray(buf, name.length());
+        debugLog(Kessel.Temp[i], "%d", buf);
+        oKessel.Temp[i] = Kessel.Temp[i];
+      }
+    }
+  }
 
   if (Kessel.Drehrost != oKessel.Drehrost) {
     kessel_drehrost.setState((Kessel.Drehrost == 0) ? false : true);
@@ -419,13 +463,6 @@ void publishFastChangingValues() {
     kessel_zuendung.setState((((int)(Kessel.Zuendung)) == 0) ? false : true);
     oKessel.Zuendung = Kessel.Zuendung;
   }
-
-  // for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
-  //  if (tempdiff(Kessel.Temp[i], oKessel.Temp[i], 0.4)) {
-  //    debugLog(Kessel.Temp[i], "%d", "kwb/temp" + i);
-  //    oKessel.Temp[i] = Kessel.Temp[i];
-  //  }
-  // }
 }
 
 void publishSlowlyChangingValues(unsigned long currentMillis) {
