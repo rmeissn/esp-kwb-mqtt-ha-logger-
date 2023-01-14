@@ -454,10 +454,12 @@ void publishSlowlyChangingValues(unsigned long currentMillis) {
   } else if (oldStat == 1 && Kessel.Rauchgastemperatur > 75) { // Restarted & starts to burn
     kessel.setValue("Brennt");
     Kessel.Kesselstatus = 2;
-  } else if (oldStat == 2 && Kessel.photo < 50 && Kessel.Geblaese > 2200) { // Burned & expires
-    kessel.setValue("Nachlauf");
-    Kessel.Kesselstatus = 3;
-  }
+  }    
+    // switches too often to afterrun, photo < 50 is already good, but geblase not - needs more/better conditions
+  // } else if (oldStat == 2 && Kessel.photo < 50 && Kessel.Geblaese > 2200) { // Burned & expires
+  //   kessel.setValue("Nachlauf");
+  //   Kessel.Kesselstatus = 3;
+  // }
   if(Kessel.photo < 20 && Kessel.Geblaese < 300) { // turn off and emergency escape
     kessel.setValue("Aus");
     Kessel.Kesselstatus = 0;
