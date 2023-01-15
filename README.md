@@ -22,9 +22,11 @@ Currently, published values are:
 | Kessel Zündung              | Boolean     | Aus |
 | Raumaustragung              | Boolean     | Aus |
 | Störung                     | Boolean     | An |
-| Wärmeanforderung            | Boolean     | Aus |
 | Reinigung                   | Boolean     | Aus |
 | Kesselpumpe                 | Boolean     | Aus |
+| Heizkreispumpe              | Boolean     | Aus |
+| Boilerpumpe                 | Boolean     | Aus |
+| Rauchsauger                 | Boolean     | Aus |
 | Kessel Unterdruck           | mbar        | 20.2 mbar |
 | Kessel Photodiode           | %           | 54% |
 | Kessel Energie              | kWh         | 25.37 kWh |
@@ -61,7 +63,7 @@ You can find the original wiring scheme and some pictures from @windundsterne in
 
 ## How to compile:
 
-This code was created with ArduinoIDE (2.0.3) and is C++.
+This code was created with ArduinoIDE (2.0.3) and is Arduino C++.
 
 1. Install Arduino IDE
 2. Open the program (as a sketch)
@@ -83,21 +85,38 @@ The resulting device is OTA capable (via Arduino IDE) and the OTA process can be
 * Removed some comments & reworked others
 * Removed MQTT publishing code and replaced it with Arduino HomeAssistant library (which includes MQTT)
 * Removed software serial code entirely (UART is used)
-* Removed debug MQTT code & replaced it with a simple function
+* Removed debug MQTT code & replaced it with my own implementation
 * Improved code styling (according to my taste)
 * Improved overall readability
 * Improved & added:
   * photodiode range now matching 0-100% (for my boiler)
-  * boiler state also publishes "Neustart" and "Nachlauf" additionally to "Brennt" and "Aus"
+  * boiler state also publishes "Neustart" additionally to "Brennt" and "Aus"
   * Raumaustragung now also measures a Saugzug, not just a Schnecke
-* Only publishing known values (not like Temp0-Temp19)
+  * Proper recording of
+    * RLAVentil
+    * Heizkreismischer
+  * Publishing of
+    * Boilerpumpe
+    * Heizkreispumpe
+    * Rauchsauger
+* Only publishing known and working values (not like Temp0-Temp19)
+
+## Finding specific bits and values for your KWB device
+
+Depending on how your KWB device is wired up, some things might be registered at other positions than on mine. To find these positions:
+
+1. Activate byte publishing by setting `bool publishUnknown = true;`
+2. Listen to `kwb/#` via MQTT (e.g. via  `mosquitto_sub -h IP -u USERNAME -P PASSWORD -v -t kwb/#`)
+3. Use the relay test function at your KWB device to trigger specific things
+4. Compare printed bytes between the function (e.g. printed bytes for function on, printed bytes for function off)
+5. Count bytes and bits to find the position for your function (e.g. byte 7, bit 0 changed from 0 to 1 to 0; always count from 0)
+6. alter the code to apply your found position by e.g. using `getbit(anData, 7, 0);`
 
 ## To-dos
 
 * Some comments are still unclear
 * Translate everything to English
-* Some states don't seem to change (Anforderung, Zündung)
-* Add all remaining & known sensors & states
+* Find new sensors & states
 * Rework code in function "otherStuff"
 
 ## Acknowledgements
