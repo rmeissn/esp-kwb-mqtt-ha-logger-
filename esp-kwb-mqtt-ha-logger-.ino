@@ -20,7 +20,7 @@
 #define TAKT100 (12.5 / 5.0)  // Taktung bei 100% Leistung 5s Laufzeit auf 12.5 sek
 
 int updateEveryMinutes = 1;
-bool publishUnknown = false;
+bool publishUnknown = false; // publish control and sense bytes to kwb/ to find specific states while using relay test
 
 // End of individual values
 
@@ -85,22 +85,6 @@ struct ef2 {
   double Geblaese = 0.0;
   double Leistung = 0.0;
   double Saugzug = 0.0;
-  int Reinigung = 0;
-  int Zuendung = 0;
-  int Drehrost = 0;
-  int Austragungslaufzeit = 0;
-  int AustragungsGesamtLaufzeit = 0;
-  int Stoerung = 0;
-  int Raumaustragung = 0;
-  int Hauptantriebimpuls = 0;           // Impulszähler
-  int Hauptantrieb = 0;                 // Hauptantrieb Motorlaufzeit in Millisekunden
-  int HauptantriebUmdrehungen = 0;      // Umdrehungen Stoker
-  int DrehungSaugschlauch = 0;          // -1 left, 0 off, 1 right
-  unsigned long HauptantriebsZeit = 1;  // Gesamt Hauptantriebszeit in Millisekunden
-  unsigned long Hauptantriebtakt = 1;   // Taktzeit in Millisekunden
-  int Pumpepuffer = 0;
-  int RLAVentil = 0;
-  int ext = 1;
   double photo = 0.0;
   double Puffer_unten = 0.0;
   double Puffer_oben = 0.0;
@@ -108,11 +92,30 @@ struct ef2 {
   double HK1_Vorlauf = 0.0;
   double Ruecklauf = 0.0;
   double Boiler = 0.0;
-  int Kesselstatus = 0;  // 0 = Off, 1 = ignition, 2 = operation 3 = afterrun
   double Temp[20];
-  String SenseByte1;
-  String SenseByte2;
-  String SenseByte3;
+  int Reinigung = 0;
+  int Zuendung = 0;
+  int Drehrost = 0;
+  int Rauchsauger = 0;
+  int Austragungslaufzeit = 0;
+  int AustragungsGesamtLaufzeit = 0;
+  int Stoerung1 = 0;
+  int Raumaustragung = 0;
+  int Hauptantriebimpuls = 0;           // Impulszähler
+  int Hauptantrieb = 0;                 // Hauptantrieb Motorlaufzeit in Millisekunden
+  int HauptantriebUmdrehungen = 0;      // Umdrehungen Stoker
+  int DrehungSaugschlauch = 0;          // -1 left, 0 off, 1 right
+  int BoilerPumpe = 0;
+  int HeizkreisPumpe = 0;
+  int KesselPumpe = 0;                  // in %
+  int RLAVentil = 0;                    // -1 close, 0 off, 1 open
+  int ext = 1;
+  int Kesselstatus = 0;                 // 0 = Off, 1 = ignition, 2 = operation 3 = afterrun
+  int Heizkreismischer = 0;             // -1 close, 0 off, 1 open
+  unsigned long HauptantriebsZeit = 1;  // Gesamt Hauptantriebszeit in Millisekunden
+  unsigned long Hauptantriebtakt = 1;   // Taktzeit in Millisekunden
+  char ctrlMsg[32 * 8];                   // 32 byte
+  char senseMsg[32 * 8];                  // 32 byte
 };
 
 struct ef2 Kessel, oKessel;  // akt. und "letzter" Kesselzustand
@@ -134,7 +137,10 @@ HASensorNumber kessel_rauchgas("kwb_kessel_rauchgas", HASensorNumber::PrecisionP
 HABinarySensor kessel_reinigung("kwb_kessel_reinigung");
 HABinarySensor kessel_zuendung("kwb_kessel_zuendung");
 HABinarySensor kessel_pumpe("kwb_kessel_pumpe");
+HABinarySensor kessel_heizkreispumpe("kwb_kessel_heizkreispumpe");
+HABinarySensor kessel_boilerpumpe("kwb_kessel_boilerpumpe");
 HABinarySensor kessel_raumaustragung("kwb_kessel_raumaustragung");
+HABinarySensor kessel_rauchsauger("kwb_kessel_rauchsauger");
 // HABinarySensor kessel_anforderung("kwb_kessel_anforderung");
 HABinarySensor kessel_stoerung("kwb_kessel_stoerung");
 HABinarySensor kessel_drehrost("kwb_kessel_drehrost");
@@ -228,10 +234,16 @@ void setup() {
   kessel_rauchgas.setUnitOfMeasurement("°C");
   kessel_reinigung.setIcon("mdi:hand-wash-outline");
   kessel_reinigung.setName("Kessel Reinigung");
+  kessel_rauchsauger.setIcon("mdi:smoke");
+  kessel_rauchsauger.setName("Kessel Rauchsauger");
   kessel_zuendung.setIcon("mdi:fire");
   kessel_zuendung.setName("Kessel Zündung");
   kessel_pumpe.setIcon("mdi:pump");
   kessel_pumpe.setName("Kessel Pumpe");
+  kessel_heizkreispumpe.setIcon("mdi:pump");
+  kessel_heizkreispumpe.setName("Heizkreis Pumpe");
+  kessel_boilerpumpe.setIcon("mdi:pump");
+  kessel_boilerpumpe.setName("Boiler Pumpe");
   kessel_raumaustragung.setIcon("mdi:warehouse");
   kessel_raumaustragung.setName("Kessel Raumaustragung");
   // kessel_anforderung.setIcon("mdi:thermometer-plus");
@@ -296,33 +308,70 @@ void debugLog(double value, char* formatter, char* topic) {
   mqtt.publish(topic, msg);
 }
 
+// transforms a message to a byte string, so specific bits can be spotted, which are states of various components, e.g. 01100110 01...
+// Byte 0 to X -> Bit 0 to X
+void recordMsgAsBinaryString(unsigned char* source,int lengthInBytes, char* target) {
+  int s = 0;
+  for (int i = 0; i < lengthInBytes; i++) {
+    unsigned char *b = (unsigned char*) &source[i];
+    unsigned char byte;
+    char tmp[2];
+
+    for (int j = 7; j >= 0; j--) {
+      byte = b[0] & (1 << j);
+      byte >>= j;
+      sprintf(tmp, "%u", byte);
+      target[j + (i * 8) + s] = tmp[0]; // add indiv. bits
+    }
+    target[(i + 1) * 8 + s] = ' '; // add space after 8 bits
+    s++;
+  }
+}
+
 void readCTRLMSGFrame(unsigned char* anData, unsigned long currentMillis) {
-  Kessel.RLAVentil = getbit(anData, 2, 3);
-  Kessel.Pumpepuffer = getbit(anData, 2, 7);
-  Kessel.Stoerung = 1 - getbit(anData, 3, 0);
+  if (publishUnknown)
+    recordMsgAsBinaryString(anData, 16, Kessel.ctrlMsg);      // 0 to 15
+
+  Kessel.HeizkreisPumpe = getbit(anData, 1, 5);
+  if (getbit(anData, 1, 7) && getbit(anData, 2, 0))            // 11 = close
+    Kessel.Heizkreismischer = -1;
+  else if (getbit(anData, 1, 7) && getbit(anData, 2, 0) == 0)  // 10 = open
+    Kessel.Heizkreismischer = 1;
+  else                                                        // 00 = off
+    Kessel.Heizkreismischer = 0;
+  if (getbit(anData, 2, 3) && getbit(anData, 2, 4))            // 11 = open
+    Kessel.RLAVentil = 1;
+  else if (getbit(anData, 2, 3) && getbit(anData, 2, 4) == 0)  // 10 = close
+    Kessel.RLAVentil = -1;
+  else                                                        // 00 = off
+    Kessel.RLAVentil = 0;
+  Kessel.BoilerPumpe = getbit(anData, 2, 5);
+  Kessel.Stoerung1 = 1 - getbit(anData, 3, 0);
   Kessel.Drehrost = getbit(anData, 3, 6);
   Kessel.Reinigung = getbit(anData, 3, 7);
+  if (getbit(anData, 4, 3) == 1)                              // left
+    Kessel.DrehungSaugschlauch = -1;
+  else if (getbit(anData, 4, 1) == 1)                         // right
+    Kessel.DrehungSaugschlauch = 1;
+  else                                                        // off
+    Kessel.DrehungSaugschlauch = 0;
+  Kessel.Rauchsauger = getbit(anData, 4, 5);
+  Kessel.KesselPumpe = (getval2(anData, 8, 1, 1, 0) / 255) * 100;
   Kessel.Raumaustragung = getbit(anData, 9, 2) || getbit(anData, 9, 5);  // Schnecke || Saugturbine
   Kessel.Hauptantriebtakt = getval2(anData, 10, 2, 10, 0);
   Kessel.Hauptantrieb = getval2(anData, 12, 2, 10, 0);
   Kessel.Zuendung = getbit(anData, 16, 2);
-  if (getbit(anData, 4, 3) == 1)
-    Kessel.DrehungSaugschlauch = -1;
-  else if (getbit(anData, 4, 1) == 1)
-    Kessel.DrehungSaugschlauch = 1;
-  else
-    Kessel.DrehungSaugschlauch = 0;
 
   // Hauptantrieb Range:  0 .. Kessel.Hauptantriebtakt
   if (oKessel.Hauptantriebtakt != 0)
-    Kessel.HauptantriebsZeit += (oKessel.Hauptantrieb * (currentMillis - timerHauptantrieb)) / (oKessel.Hauptantriebtakt);
+    Kessel.HauptantriebsZeit += (oKessel.Hauptantrieb * (currentMillis - timerHauptantrieb)) / oKessel.Hauptantriebtakt;
 
   timerHauptantrieb = currentMillis;
   oKessel.Hauptantrieb = Kessel.Hauptantrieb;
   oKessel.Hauptantriebtakt = Kessel.Hauptantriebtakt;
 
   // sum kwh
-  double deltat = (currentMillis - kwhtimer) / (3600.0 * 1000.0);  // in h
+  double deltat = (currentMillis - kwhtimer) / (3600 * 1000.0);  // in h
 
   if (Kessel.Leistung > 1)
     Kessel.Brennerstunden += deltat;  // if burning
@@ -341,29 +390,13 @@ void readCTRLMSGFrame(unsigned char* anData, unsigned long currentMillis) {
   }
 }
 
-void publishByte(char* topic, String byte) {
-  char msg[64];
-  byte.toCharArray(msg, 8);
-  mqtt.publish(topic, msg);
-}
-
-String recordByte(int index, unsigned char* anData) {
-  String t = "";
-  for (int i = 0; i < 8; i++) {
-    t += getbit(anData, index, i);;
-  }
-  return t;
-}
-
 void readSenseMSGFrame(unsigned char* anData, unsigned long currentMillis) {
-  // Zustände an Byte 3 und 4
-  Kessel.SenseByte1 = recordByte(3, anData);
-  Kessel.SenseByte2 = recordByte(4, anData);
-  Kessel.SenseByte3 = recordByte(5, anData);
+  // States at byte 3 and 4 (maybe 0 to 5?)
+  if (publishUnknown)
+    recordMsgAsBinaryString(anData, 6, Kessel.senseMsg); // 0 to 5
   Kessel.Hauptantriebimpuls = getbit(anData, 3, 7);
   Kessel.ext = getbit(anData, 4, 7);
-  // Zustände an Byte5?
-  // Sensorwerte an folgenden Bytes (jeweils 2 lang)
+  // sensor values at the follwing bytes, 2 bytes per value
   Kessel.HK1_Vorlauf = getval2(anData, 6, 2, 0.1, 1);
   Kessel.Ruecklauf = getval2(anData, 8, 2, 0.1, 1);
   Kessel.Boiler = getval2(anData, 10, 2, 0.1, 1);
@@ -410,23 +443,16 @@ void readSenseMSGFrame(unsigned char* anData, unsigned long currentMillis) {
 }
 
 void publishFastChangingValues() {
-  // if (Kessel.RLAVentil != oKessel.RLAVentil) {
-  //   debugLog(Kessel.RLAVentil, "%d", "kwb/rlaventil"); // 0/1 - actually the valve is able to turn left/right, so this might be either left or right and a second bit (0/1) is missing
-  //   oKessel.RLAVentil = Kessel.RLAVentil;
-  // }
-  if(publishUnknown) {
-    if(Kessel.SenseByte1 != oKessel.SenseByte1) {
-      publishByte("kwb/senseByte1", Kessel.SenseByte1);
-      oKessel.SenseByte1 = Kessel.SenseByte1;
+  if (publishUnknown) {
+    if (strcmp(Kessel.senseMsg, oKessel.senseMsg) != 0) {
+      mqtt.publish("kwb/senseMsg", Kessel.senseMsg);
+      memcpy(&(oKessel.senseMsg), &(Kessel.senseMsg), sizeof (Kessel.senseMsg));
     }
-    if(Kessel.SenseByte2 != oKessel.SenseByte2) {
-      publishByte("kwb/senseByte2", Kessel.SenseByte2);
-      oKessel.SenseByte2 = Kessel.SenseByte2;
+    if (strcmp(Kessel.ctrlMsg, oKessel.ctrlMsg) != 0) {
+      mqtt.publish("kwb/ctrlMsg", Kessel.ctrlMsg);
+      memcpy(&(oKessel.ctrlMsg), &(Kessel.ctrlMsg), sizeof (Kessel.ctrlMsg));
     }
-    if(Kessel.SenseByte3 != oKessel.SenseByte3) {
-      publishByte("kwb/senseByte3", Kessel.SenseByte3);
-      oKessel.SenseByte3 = Kessel.SenseByte3;
-    }
+
     for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
       if (tempdiff(Kessel.Temp[i], oKessel.Temp[i], 0.4)) {
         String name = "kwb/temp" + i;
@@ -438,8 +464,38 @@ void publishFastChangingValues() {
     }
   }
 
+  if (Kessel.BoilerPumpe != oKessel.BoilerPumpe) {
+    kessel_boilerpumpe.setState(Kessel.BoilerPumpe);
+    oKessel.BoilerPumpe = Kessel.BoilerPumpe;
+  }
+
+  if (Kessel.HeizkreisPumpe != oKessel.HeizkreisPumpe) {
+    kessel_heizkreispumpe.setState(Kessel.HeizkreisPumpe);
+    oKessel.HeizkreisPumpe = Kessel.HeizkreisPumpe;
+  }
+
+  if (Kessel.Heizkreismischer != oKessel.Heizkreismischer) {
+    debugLog(Kessel.Heizkreismischer, "%d", "kwb/Heizkreismischer");
+    oKessel.Heizkreismischer = Kessel.Heizkreismischer;
+  }
+
+  if (Kessel.DrehungSaugschlauch != oKessel.DrehungSaugschlauch) {
+    debugLog(Kessel.DrehungSaugschlauch, "%d", "kwb/DrehungSaugschlauch");
+    oKessel.DrehungSaugschlauch = Kessel.DrehungSaugschlauch;
+  }
+
+  if (Kessel.RLAVentil != oKessel.RLAVentil) {
+    debugLog(Kessel.RLAVentil, "%d", "kwb/RLAVentil");
+    oKessel.RLAVentil = Kessel.RLAVentil;
+  }
+
+  if (Kessel.Rauchsauger != oKessel.Rauchsauger) {
+    kessel_rauchsauger.setState(Kessel.Rauchsauger);
+    oKessel.Rauchsauger = Kessel.Rauchsauger;
+  }
+
   if (Kessel.Drehrost != oKessel.Drehrost) {
-    kessel_drehrost.setState((Kessel.Drehrost == 0) ? false : true);
+    kessel_drehrost.setState(Kessel.Drehrost);
     oKessel.Drehrost = Kessel.Drehrost;
   }
 
@@ -449,18 +505,18 @@ void publishFastChangingValues() {
   }
 
   if (Kessel.Raumaustragung != oKessel.Raumaustragung) {
-    kessel_raumaustragung.setState((((int)(Kessel.Raumaustragung)) == 0) ? false : true);
+    kessel_raumaustragung.setState(Kessel.Raumaustragung);
     oKessel.Raumaustragung = Kessel.Raumaustragung;
   }
 
   if (Kessel.Reinigung != oKessel.Reinigung) {
-    kessel_reinigung.setState((((int)(Kessel.Reinigung)) == 0) ? false : true);
+    kessel_reinigung.setState(Kessel.Reinigung);
     oKessel.Reinigung = Kessel.Reinigung;
   }
 
-    // debugLog(Kessel.Zuendung, "%d", "kwb/zuendung");
   if (Kessel.Zuendung != oKessel.Zuendung) {
-    kessel_zuendung.setState((((int)(Kessel.Zuendung)) == 0) ? false : true);
+    debugLog(Kessel.Zuendung, "%d", "kwb/zuendung");  // schaltet nie auf 1?
+    kessel_zuendung.setState(Kessel.Zuendung);
     oKessel.Zuendung = Kessel.Zuendung;
   }
 }
@@ -474,8 +530,7 @@ void publishSlowlyChangingValues(unsigned long currentMillis) {
   kessel_ruecklauf.setValue(float(Kessel.Ruecklauf));
   kessel_temperatur.setValue(float(Kessel.Kesseltemperatur));
   kessel_rauchgas.setValue(float(Kessel.Rauchgastemperatur));
-  // debugLog(Kessel.Pumpepuffer, "%d", "kwb/pumpe");
-  kessel_pumpe.setState((((int)(Kessel.Pumpepuffer)) == 0) ? false : true);
+  kessel_pumpe.setState(Kessel.KesselPumpe == 100);
   kessel_geblaese.setValue(float(Kessel.Geblaese));
   kessel_saugzug.setValue(float(Kessel.Saugzug));
 
@@ -491,13 +546,13 @@ void publishSlowlyChangingValues(unsigned long currentMillis) {
   } else if (oldStat == 1 && Kessel.Rauchgastemperatur > 75) { // Restarted & starts to burn
     kessel.setValue("Brennt");
     Kessel.Kesselstatus = 2;
-  }    
+  }
     // switches too often to afterrun, photo < 50 is already good, but geblase not - needs more/better conditions
   // } else if (oldStat == 2 && Kessel.photo < 50 && Kessel.Geblaese > 2200) { // Burned & expires
   //   kessel.setValue("Nachlauf");
   //   Kessel.Kesselstatus = 3;
   // }
-  if(Kessel.photo < 20 && Kessel.Geblaese < 300) { // turn off and emergency escape
+  if (Kessel.photo < 20 && Kessel.Geblaese < 300) { // turn off and emergency escape
     kessel.setValue("Aus");
     Kessel.Kesselstatus = 0;
   }
@@ -505,19 +560,13 @@ void publishSlowlyChangingValues(unsigned long currentMillis) {
   // debugLog(Kessel.ext, "%d", "kwb/anforderung");
   // kessel_anforderung.setState((((int)(Kessel.ext)) == 0) ? false : true);
   kessel_energie.setValue(float(Kessel.kwh));
-  // debugLog(Kessel.KeineStoerung, "%d", "kwb/stoerung");
-  kessel_stoerung.setState((Kessel.Stoerung == 0) ? false : true);
+  kessel_stoerung.setState(Kessel.Stoerung1);
   kessel_brennerstunden.setValue(float(Kessel.Brennerstunden));
   kessel_unterdruck.setValue(float(Kessel.Unterdruck));
 }
 
 void otherStuff(unsigned long currentMillis) {
   // kessel_proztemperatur.setValue(float(Kessel.Proztemperatur)); // HASensorNumber %.1f
-
-  // for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
-  //   debugLog(Kessel.Temp[i], "%d", "kwb/temp" + i);
-  // }
-
   // kessel_HauptantriebUmdrehungen.setValue(Kessel.HauptantriebUmdrehungen); // HASensorNumber int
   // kessel_HauptantriebsZeit.setValue(Kessel.HauptantriebsZeit); // HASensorNumber int
   // kessel_hauptantriebtakt.setValue(float(Kessel.Hauptantriebtakt / 1000.0)); // HASensorNumber %2.1f
