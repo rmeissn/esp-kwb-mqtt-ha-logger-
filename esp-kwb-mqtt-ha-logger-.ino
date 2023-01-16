@@ -1,8 +1,7 @@
 // reads control and sense data from the rs485 bus
-// Hardware
-// Webmos d1 mini + MAX485 module
-// power supply via USB
-// Additionally to the read values, Brennerlaufzeit and Gesamtenergie are calculated, with which pellet consumption can be estimated (~4.3kg/kwh for an EF2)
+// publishes read values via MQTT for HomeAssistant
+// Hardware: ESP8266 (wemos d1 mini) + MAX485 module, power supply via USB
+// Additionally to the read values, Brennerlaufzeit and Gesamtenergie are calculated, with which pellet consumption can be estimated (~4.3kg/kwh for an EasyFire 2)
 
 // Individual values
 // #define WIFISSID "SSID"
@@ -16,12 +15,11 @@
 #include "conf.h"
 #endif
 
-#define LEISTUNGKESSEL 22.0   // KW at 100 %
+#define LEISTUNGKESSEL 22.0   // KW at 100%
 #define TAKT100 (12.5 / 5.0)  // Taktung bei 100% Leistung 5s Laufzeit auf 12.5 sek
 
 int updateEveryMinutes = 1;
-bool publishUnknown = false; // publish control and sense bytes to kwb/ to find specific states while using relay test
-
+// #define PUBLISHUNKNOWN true; // publish control and sense bytes to kwb/ to find specific states while using relay test
 // End of individual values
 
 #include <ESP8266WiFi.h>
@@ -40,11 +38,10 @@ bool publishUnknown = false; // publish control and sense bytes to kwb/ to find 
 #define FALSE 0
 #define TRUE 1
 
-// Globals
-
+// Globals ********************************************************************
 int HauptantriebsImpuls = 0;
 long Umdrehungen = 0, ZD = 0, AustragungsGesamtLaufzeit = 0;
-long NebenantriebsZeit = 0, HauptantriebsZeit = 0, HANAtimer = 0;  // Timer zur Ausgabe der Hauptantrieb/Nebenantrieb Ratio
+long NebenantriebsZeit = 0, HauptantriebsZeit = 0, HANAtimer = 0;  // HANAtimer = Timer zur Ausgabe der Hauptantrieb/Nebenantrieb Ratio
 
 extern long bytecounter;
 extern long framecounter;
@@ -67,18 +64,17 @@ extern long errorcounter;
 double Nebenantriebsfaktor = 5.4;
 double Hauptantriebsfakter = (400.0 / 128.0);  // 400g in 120sek. > 3.333 g/s
 
-unsigned long bytecount = 0;
-unsigned long waitcount = 0;
-unsigned long longwaitcount = 0;
 unsigned long timerd = 0, lastUpdateCycleMillis = 0;
 unsigned long austragungStartedAtMillis = 0;
 unsigned long timerHauptantrieb = 0;
-unsigned long kwhtimer = 0;  // Zeit seit letzer KW Messung
+unsigned long kwhtimer = 0; // time since last KW measurement
+unsigned long wifiPreviousTime = 0;
+int wifiReconnectDelay = 5; //mins
 
 struct ef2 {
   double kwh = 0.1;
   double Rauchgastemperatur = 0.0;
-  double Proztemperatur = 0.0;  // Prozessortemperatur? Temperatur der Steuerung?
+  double Proztemperatur = 0.0;          // Prozessortemperatur? Temperatur der Steuerung?
   double Unterdruck = 0.0;
   double Brennerstunden = 0.0;
   double Kesseltemperatur = 0.0;
@@ -114,11 +110,11 @@ struct ef2 {
   int Heizkreismischer = 0;             // -1 close, 0 off, 1 open
   unsigned long HauptantriebsZeit = 1;  // Gesamt Hauptantriebszeit in Millisekunden
   unsigned long Hauptantriebtakt = 1;   // Taktzeit in Millisekunden
-  char ctrlMsg[32 * 8];                   // 32 byte
-  char senseMsg[32 * 8];                  // 32 byte
+  char ctrlMsg[32 * 8];                 // 32 byte
+  char senseMsg[32 * 8];                // 32 byte
 };
 
-struct ef2 Kessel, oKessel;  // akt. und "letzter" Kesselzustand
+struct ef2 Kessel, oKessel; // current and last boiler state
 
 #include "espinclude.h"
 
@@ -152,9 +148,6 @@ HASensorNumber kessel_energie("kwb_kessel_energie", HASensorNumber::PrecisionP3)
 HASensorNumber kessel_brennerstunden("kwb_kessel_brennerstunden", HASensorNumber::PrecisionP3);
 HASensorNumber kessel_unterdruck("kwb_kessel_unterdruck", HASensorNumber::PrecisionP1);
 
-unsigned long wifiPreviousTime = 0;
-int wifiReconnectDelay = 5; //mins
-
 void wifiReconnectIfLost(unsigned long currentTime) {
   if ((WiFi.status() != WL_CONNECTED) && (currentTime - wifiPreviousTime >= wifiReconnectDelay * 60 * 10)) {
     WiFi.disconnect();
@@ -186,7 +179,7 @@ void setup() {
 
   ArduinoOTA.begin();
   #ifdef OTAPASSWORD
-  ArduinoOTA.setPassword((const char*)OTAPASSWORD);
+    ArduinoOTA.setPassword((const char*)OTAPASSWORD);
   #endif
 
   for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
@@ -310,7 +303,10 @@ void debugLog(double value, char* formatter, char* topic) {
 
 // transforms a message to a byte string, so specific bits can be spotted, which are states of various components, e.g. 01100110 01...
 // Byte 0 to X -> Bit 0 to X
-void recordMsgAsBinaryString(unsigned char* source,int lengthInBytes, char* target) {
+// source = source byte array (1 char = 1 byte)
+// lengthInBytes = how many bytes shall be converted to bits
+// target = target, where to copy the resulting bit array (1 char per bit)
+void recordMsgAsBinaryString(unsigned char* source, int lengthInBytes, char* target) {
   int s = 0;
   for (int i = 0; i < lengthInBytes; i++) {
     unsigned char *b = (unsigned char*) &source[i];
@@ -328,40 +324,48 @@ void recordMsgAsBinaryString(unsigned char* source,int lengthInBytes, char* targ
   }
 }
 
-void readCTRLMSGFrame(unsigned char* anData, unsigned long currentMillis) {
-  if (publishUnknown)
-    recordMsgAsBinaryString(anData, 16, Kessel.ctrlMsg);      // 0 to 15
+// extract data from the control message
+// data = data char array (1 char = 1 byte) = read message
+// currentMillis = current milliseconds the MCU is online
+// dataLength = length of the data array in byte/chars
+void readCTRLMSGFrame(unsigned char* data, unsigned long currentMillis, int dataLength) {
+  #ifdef PUBLISHUNKNOWN
+    int recordNoOfBytes = 17; // 0 to 16; what's there after byte 16?
+    recordNoOfBytes = (recordNoOfBytes <= dataLength) ? recordNoOfBytes : dataLength;
+    recordMsgAsBinaryString(data, recordNoOfBytes, Kessel.ctrlMsg);
+  #endif
 
-  Kessel.HeizkreisPumpe = getbit(anData, 1, 5);
-  if (getbit(anData, 1, 7) && getbit(anData, 2, 0))            // 11 = close
+  Kessel.HeizkreisPumpe = getBit(data, 1, 5);
+  if (getBit(data, 1, 7) && getBit(data, 2, 0))            // 1 & 1 = close
     Kessel.Heizkreismischer = -1;
-  else if (getbit(anData, 1, 7) && getbit(anData, 2, 0) == 0)  // 10 = open
+  else if (getBit(data, 1, 7) && getBit(data, 2, 0) == 0)  // 1 & 0 = open
     Kessel.Heizkreismischer = 1;
-  else                                                        // 00 = off
+  else                                                     // 0 & 0 = off
     Kessel.Heizkreismischer = 0;
-  if (getbit(anData, 2, 3) && getbit(anData, 2, 4))            // 11 = open
+  if (getBit(data, 2, 3) && getBit(data, 2, 4))            // 1 & 1 = open
     Kessel.RLAVentil = 1;
-  else if (getbit(anData, 2, 3) && getbit(anData, 2, 4) == 0)  // 10 = close
+  else if (getBit(data, 2, 3) && getBit(data, 2, 4) == 0)  // 1 & 0 = close
     Kessel.RLAVentil = -1;
-  else                                                        // 00 = off
+  else                                                     // 0 & 0 = off
     Kessel.RLAVentil = 0;
-  Kessel.BoilerPumpe = getbit(anData, 2, 5);
-  Kessel.Stoerung1 = 1 - getbit(anData, 3, 0);
-  Kessel.Drehrost = getbit(anData, 3, 6);
-  Kessel.Reinigung = getbit(anData, 3, 7);
-  if (getbit(anData, 4, 3) == 1)                              // left
+  Kessel.BoilerPumpe = getBit(data, 2, 5);
+  Kessel.Stoerung1 = 1 - getBit(data, 3, 0);
+  Kessel.Drehrost = getBit(data, 3, 6);
+  Kessel.Reinigung = getBit(data, 3, 7);
+  if (getBit(data, 4, 3) == 1)                              // left
     Kessel.DrehungSaugschlauch = -1;
-  else if (getbit(anData, 4, 1) == 1)                         // right
+  else if (getBit(data, 4, 1) == 1)                         // right
     Kessel.DrehungSaugschlauch = 1;
-  else                                                        // off
+  else                                                      // off
     Kessel.DrehungSaugschlauch = 0;
-  Kessel.Rauchsauger = getbit(anData, 4, 5);
-  Kessel.KesselPumpe = (getval2(anData, 8, 1, 1, 0) / 255) * 100;
-  Kessel.Raumaustragung = getbit(anData, 9, 2) || getbit(anData, 9, 5);  // Schnecke || Saugturbine
-  Kessel.Hauptantriebtakt = getval2(anData, 10, 2, 10, 0);
-  Kessel.Hauptantrieb = getval2(anData, 12, 2, 10, 0);
-  Kessel.Zuendung = getbit(anData, 16, 2);
+  Kessel.Rauchsauger = getBit(data, 4, 5);
+  Kessel.KesselPumpe = (getValue(data, 8, 1, 1, false) / 255) * 100;
+  Kessel.Raumaustragung = getBit(data, 9, 2) || getBit(data, 9, 5); // Schnecke || Saugturbine
+  Kessel.Hauptantriebtakt = getValue(data, 10, 2, 10, false);
+  Kessel.Hauptantrieb = getValue(data, 12, 2, 10, false);
+  Kessel.Zuendung = getBit(data, 16, 2);
 
+  // TODO review the below code
   // Hauptantrieb Range:  0 .. Kessel.Hauptantriebtakt
   if (oKessel.Hauptantriebtakt != 0)
     Kessel.HauptantriebsZeit += (oKessel.Hauptantrieb * (currentMillis - timerHauptantrieb)) / oKessel.Hauptantriebtakt;
@@ -390,47 +394,57 @@ void readCTRLMSGFrame(unsigned char* anData, unsigned long currentMillis) {
   }
 }
 
-void readSenseMSGFrame(unsigned char* anData, unsigned long currentMillis) {
+// extract data from the sense message
+// data = data char array (1 char = 1 byte) = read message
+// currentMillis = current milliseconds the MCU is online
+// dataLength = length of the data array in byte/chars
+void readSenseMSGFrame(unsigned char* data, unsigned long currentMillis, int dataLength) {
   // States at byte 3 and 4 (maybe 0 to 5?)
-  if (publishUnknown)
-    recordMsgAsBinaryString(anData, 6, Kessel.senseMsg); // 0 to 5
-  Kessel.Hauptantriebimpuls = getbit(anData, 3, 7);
-  Kessel.ext = getbit(anData, 4, 7);
+  #ifdef PUBLISHUNKNOWN
+    int recordNoOfBytes = 6; // 0 to 5; 6 - 23 are known, see below
+    recordNoOfBytes = (recordNoOfBytes <= dataLength) ? recordNoOfBytes : dataLength;
+    recordMsgAsBinaryString(data, recordNoOfBytes, Kessel.senseMsg);
+  #endif
+
+  Kessel.Hauptantriebimpuls = getBit(data, 3, 7);
+  Kessel.ext = getBit(data, 4, 7);
   // sensor values at the follwing bytes, 2 bytes per value
-  Kessel.HK1_Vorlauf = getval2(anData, 6, 2, 0.1, 1);
-  Kessel.Ruecklauf = getval2(anData, 8, 2, 0.1, 1);
-  Kessel.Boiler = getval2(anData, 10, 2, 0.1, 1);
-  Kessel.Kesseltemperatur = getval2(anData, 12, 2, 0.1, 1);
-  Kessel.Puffer_unten = getval2(anData, 14, 2, 0.1, 1);
-  Kessel.Puffer_oben = getval2(anData, 16, 2, 0.1, 1);
-  Kessel.HK1_aussen = getval2(anData, 18, 2, 0.1, 1);
-  Kessel.Rauchgastemperatur = getval2(anData, 20, 2, 0.1, 1);
-  Kessel.Proztemperatur = getval2(anData, 22, 2, 0.1, 1);
+  Kessel.HK1_Vorlauf = getValue(data, 6, 2, 0.1, true);
+  Kessel.Ruecklauf = getValue(data, 8, 2, 0.1, true);
+  Kessel.Boiler = getValue(data, 10, 2, 0.1, true);
+  Kessel.Kesseltemperatur = getValue(data, 12, 2, 0.1, true);
+  Kessel.Puffer_unten = getValue(data, 14, 2, 0.1, true);
+  Kessel.Puffer_oben = getValue(data, 16, 2, 0.1, true);
+  Kessel.HK1_aussen = getValue(data, 18, 2, 0.1, true);
+  Kessel.Rauchgastemperatur = getValue(data, 20, 2, 0.1, true);
+  Kessel.Proztemperatur = getValue(data, 22, 2, 0.1, true);
   // see loop for 24 to 31
-  Kessel.photo = getval2(anData, 32, 2, 0.1, 1);
-  Kessel.Unterdruck = getval2(anData, 34, 2, 0.1, 1);
+  Kessel.photo = getValue(data, 32, 2, 0.1, true);
+  Kessel.Unterdruck = getValue(data, 34, 2, 0.1, true);
   // see loop for 36 to 68
-  Kessel.Saugzug = getval2(anData, 69, 2, 0.6, 0);
-  Kessel.Geblaese = getval2(anData, 71, 2, 0.6, 0);
+  Kessel.Saugzug = getValue(data, 69, 2, 0.6, false);
+  Kessel.Geblaese = getValue(data, 71, 2, 0.6, false);
   // see loop for 73 to 68
   // what about byte area starting from 89?
+  #ifdef PUBLISHUNKNOWN
+    for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
+      int s = i * 2 + 24;  // 24 to 30
+      if (i >= 4)
+        s = i * 2 + 28;  // 36 to 50
+      else if (i >= 12)  // unknown area between 52 to 68
+        s = i * 2 + 49;  // 73 to 87
+      if(s + 1 <= dataLength) // s+1 because we read 2 bytes
+        Kessel.Temp[i] = getValue(data, s, 2, 0.1, true);
+    }
+  #endif
 
-  for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
-    int s = i * 2 + 24;  // 24 to 30
-    if (i >= 4)
-      s = i * 2 + 28;  // 36 to 50
-    else if (i >= 12)  // unknown area between 52 to 68
-      s = i * 2 + 49;  // 73 to 87
-    Kessel.Temp[i] = getval2(anData, s, 2, 0.1, 1);
-  }
-
-  // Range photo -221 to 127 - 348 numbers
-  // x + 255 - offset to zero / range -> 0 to 1 * 100 -> range 0 to 100
+  // Range photo -221 to 127 - 348 numbers; x + 255 - offset to zero / range -> 0 to 1 * 100 -> range 0 to 100
   Kessel.photo = round(((Kessel.photo + 221.0) / 348) * 100);
   Kessel.photo = (Kessel.photo < 0) ? 0 : (Kessel.photo > 100) ? 100 : Kessel.photo;
   // old way
   // Kessel.photo = ((int) (Kessel.photo + 255.0) * 100) >> 9; // Result range 6 to 74
 
+  // TODO review the below code
   // zwei gleiche impulse, die vom akt. unterschiedlich sind
   if ((Kessel.Hauptantriebimpuls == oKessel.Hauptantriebimpuls) && (Kessel.Hauptantriebimpuls != HauptantriebsImpuls)) {
     // Hauptantrieb läuft und produziert Impulse
@@ -442,8 +456,9 @@ void readSenseMSGFrame(unsigned char* anData, unsigned long currentMillis) {
   oKessel.Hauptantriebimpuls = Kessel.Hauptantriebimpuls;
 }
 
+// Some values change quite fast, which is why they are published immedeately
 void publishFastChangingValues() {
-  if (publishUnknown) {
+  #ifdef PUBLISHUNKNOWN
     if (strcmp(Kessel.senseMsg, oKessel.senseMsg) != 0) {
       mqtt.publish("kwb/senseMsg", Kessel.senseMsg);
       memcpy(&(oKessel.senseMsg), &(Kessel.senseMsg), sizeof (Kessel.senseMsg));
@@ -462,7 +477,7 @@ void publishFastChangingValues() {
         oKessel.Temp[i] = Kessel.Temp[i];
       }
     }
-  }
+  #endif
 
   if (Kessel.BoilerPumpe != oKessel.BoilerPumpe) {
     kessel_boilerpumpe.setState(Kessel.BoilerPumpe);
@@ -515,12 +530,14 @@ void publishFastChangingValues() {
   }
 
   if (Kessel.Zuendung != oKessel.Zuendung) {
-    debugLog(Kessel.Zuendung, "%d", "kwb/zuendung");  // schaltet nie auf 1?
+    debugLog(Kessel.Zuendung, "%d", "kwb/zuendung");  // never switched to 1 yet?
     kessel_zuendung.setState(Kessel.Zuendung);
     oKessel.Zuendung = Kessel.Zuendung;
   }
 }
 
+// values which change quite slowly
+// currentMillis =  current milliseconds the MCU is on
 void publishSlowlyChangingValues(unsigned long currentMillis) {
   puffer_oben.setValue(float(Kessel.Puffer_oben));
   puffer_unten.setValue(float(Kessel.Puffer_unten));
@@ -565,6 +582,8 @@ void publishSlowlyChangingValues(unsigned long currentMillis) {
   kessel_unterdruck.setValue(float(Kessel.Unterdruck));
 }
 
+// TODO review the code of this function
+// currentMillis =  current milliseconds the MCU is on
 void otherStuff(unsigned long currentMillis) {
   // kessel_proztemperatur.setValue(float(Kessel.Proztemperatur)); // HASensorNumber %.1f
   // kessel_HauptantriebUmdrehungen.setValue(Kessel.HauptantriebUmdrehungen); // HASensorNumber int
@@ -627,24 +646,21 @@ void otherStuff(unsigned long currentMillis) {
 ///////////////////// Main Loop //////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////
 void loop() {
-  unsigned char anData[256];
-  int nDataLen, nID, frameid, error;
+  unsigned char msgData[256];
+  int dataLength, msgID, frameID, error;
 
   mqtt.loop();
   ArduinoOTA.handle();
 
-  // Read RS485 dataframe
-  int r = readframe(anData, nID, nDataLen, frameid, error);
-  // if (!r)
-  //   debugLog(nID, "Checksum error ID: %d", "kwb/error");
+  int r = readFrame(msgData, msgID, dataLength, frameID, error); // Read RS485 dataframe
+  // if (!r) debugLog(msgID, "Checksum error ID: %d", "kwb/error");
 
   unsigned long currentMillis = millis();
 
-  if (nID == 33) {  // Control MSG  (from operating unit to boiler)
-    readCTRLMSGFrame(anData, currentMillis);
-  } else if (nID == 32) {  // Sense package
-    readSenseMSGFrame(anData, currentMillis);
-  }
+  if (msgID == 33) // Control message from operating unit to boiler
+    readCTRLMSGFrame(msgData, currentMillis, dataLength);
+  else if (msgID == 32) // Sense message from boiler to operating unit
+    readSenseMSGFrame(msgData, currentMillis, dataLength);
 
   publishFastChangingValues();
 
@@ -654,13 +670,12 @@ void loop() {
     bytecounter = 0;
 
     publishSlowlyChangingValues(currentMillis);
-    otherStuff(currentMillis);
+    otherStuff(currentMillis); // NOTE not sure this need yet (code not reviewed), but kept here for convenience
 
     memcpy(&oKessel, &Kessel, sizeof Kessel);
     lastUpdateCycleMillis = currentMillis;
     wifiReconnectIfLost(currentMillis);
   }
 
-  // delay at the end of the loop to not trigger the SW Watchdog
-  delay(5);
+  delay(5); // delay at the end of the loop to not trigger the SW Watchdog
 }
