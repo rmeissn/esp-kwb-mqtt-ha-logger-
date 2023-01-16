@@ -9,6 +9,11 @@ unsigned long longwaitcount = 0;
 unsigned long bytecount = 0;
 unsigned long waitcount = 0;
 
+#define STATE_WAIT_FOR_HEADER 1
+#define STATE_READ_MSG 2
+#define MSG_TYPE_CTRL 1
+#define MSG_TYPE_SENSE 2
+
 // read a byte if it is there in x ms
 unsigned char readByte() {
   unsigned char b;
@@ -80,17 +85,16 @@ unsigned char CrcAdd(unsigned char crc, unsigned char numberOfByte) {
 
 
 // Read RS 484 Frame
-int readFrame(unsigned char anData[], int &nID, int &nDataLen, int &fid, int &error) {
-  int nState, bRxFinished;
-  unsigned char nType, nLen, nCounter, nChecksum;
-  unsigned char nX;
-  unsigned char nCrc;
-  nState = STATE_WAIT_FOR_HEADER;
-  bRxFinished = FALSE;
-  nLen = 0; nCounter = 0; nType = 0; nID = 0; nChecksum = 0; nDataLen = 0; nCrc = 0;
+// return error reading frame = true/false
+bool readFrame(unsigned char anData[], int &nID, int &nDataLen, int &fid) {
+  int nState = STATE_WAIT_FOR_HEADER;
+  bool bRxFinished = false;
+  unsigned char nType = 0, nLen = 0, nCounter = 0, nChecksum = 0, nCrc  = 0, nX;
+  nDataLen = 0; nID = 0;
+
   for (int i = 0; i < 256; i++) anData[i] = 0;
 
-  while (bRxFinished == FALSE) {
+  while (!bRxFinished) {
     nX = readByte(); // read one byte
 
     if ((nState == STATE_WAIT_FOR_HEADER) && (nX == 2)) {
@@ -127,20 +131,17 @@ int readFrame(unsigned char anData[], int &nID, int &nDataLen, int &fid, int &er
             }
           }
           nChecksum = readByte();
-          bRxFinished = TRUE;
+          bRxFinished = true;
         }
       }
     }
   }
 
   framecounter++;
-  if ((nChecksum == nCrc) || ((nChecksum == 253) && (nCrc == 2))) {
-    error=0;
-    return 1;
-  } else {
-    // Statistik fehlerhafte Frames
+  if ((nChecksum == nCrc) || ((nChecksum == 253) && (nCrc == 2)))
+    return false;
+  else { // statistics for faulty frames
     errorcounter++;
-    error=1;
-    return 0;
+    return true;
   }
 }

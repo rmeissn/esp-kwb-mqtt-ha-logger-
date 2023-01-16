@@ -31,13 +31,6 @@ int updateEveryMinutes = 1;
 #include <ArduinoHA.h>
 #include <math.h>
 
-#define STATE_WAIT_FOR_HEADER 1
-#define STATE_READ_MSG 2
-#define MSG_TYPE_CTRL 1
-#define MSG_TYPE_SENSE 2
-#define FALSE 0
-#define TRUE 1
-
 // Globals ********************************************************************
 int HauptantriebsImpuls = 0;
 long Umdrehungen = 0, ZD = 0, AustragungsGesamtLaufzeit = 0;
@@ -647,13 +640,13 @@ void otherStuff(unsigned long currentMillis) {
 //////////////////////////////////////////////////////////////////////////
 void loop() {
   unsigned char msgData[256];
-  int dataLength, msgID, frameID, error;
+  int dataLength, msgID, frameID;
 
   mqtt.loop();
   ArduinoOTA.handle();
 
-  int r = readFrame(msgData, msgID, dataLength, frameID, error); // Read RS485 dataframe
-  // if (!r) debugLog(msgID, "Checksum error ID: %d", "kwb/error");
+  bool error = readFrame(msgData, msgID, dataLength, frameID); // Read RS485 dataframe
+  // if (error) debugLog(msgID, "Checksum error ID: %d", "kwb/error");
 
   unsigned long currentMillis = millis();
 
