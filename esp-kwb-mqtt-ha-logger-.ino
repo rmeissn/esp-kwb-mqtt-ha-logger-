@@ -60,8 +60,7 @@ double Hauptantriebsfakter = (400.0 / 128.0);  // 400g in 120sek. > 3.333 g/s
 
 unsigned long timerd = 0, lastUpdateCycleMillis = 0;
 unsigned long austragungStartedAtMillis = 0;
-unsigned long timerHauptantrieb = 0;
-unsigned long kwhtimer = 0; // time since last KW measurement
+unsigned long millisAtLastRun = 0; // millis since last loop run
 unsigned long wifiPreviousTime = 0;
 int wifiReconnectDelay = 5; //mins
 
@@ -87,7 +86,6 @@ struct ef2 {
   int Zuendung = 0;
   int Drehrost = 0;
   int Rauchsauger = 0;
-  int Austragungslaufzeit = 0;
   int AustragungsGesamtLaufzeit = 0;
   int Stoerung1 = 0;
   int Raumaustragung = 0;
@@ -253,6 +251,12 @@ void debugLog(int value, char* formatter, char* topic) {
   mqtt.publish(topic, msg);
 }
 
+void debugLog(unsigned long value, char* formatter, char* topic) {
+  char msg[64];
+  sprintf(msg, formatter, value);
+  mqtt.publish(topic, msg);
+}
+
 void debugLog(double value, char* formatter, char* topic) {
   char msg[64];
   sprintf(msg, formatter, value);
@@ -340,28 +344,26 @@ void readCTRLMSGFrame(unsigned char* data, unsigned long currentMillis, int data
 
   // TODO review the below code
   // Hauptantrieb Range:  0 .. Kessel.Hauptantriebtakt
-  if (oKessel.Hauptantriebtakt != 0)
-    Kessel.HauptantriebsZeit += (oKessel.Hauptantrieb * (currentMillis - timerHauptantrieb)) / oKessel.Hauptantriebtakt;
+  if (oKessel.Hauptantriebtakt != 0) // when activated?
+    Kessel.HauptantriebsZeit += (oKessel.Hauptantrieb * (currentMillis - millisAtLastRun)) / oKessel.Hauptantriebtakt;
 
-  timerHauptantrieb = currentMillis;
   oKessel.Hauptantrieb = Kessel.Hauptantrieb;
   oKessel.Hauptantriebtakt = Kessel.Hauptantriebtakt;
 
-  // sum kwh
-  double deltat = (currentMillis - kwhtimer) / (3600 * 1000.0);  // in h
+  double deltat = (currentMillis - millisAtLastRun) / (3600 * 1000.0); // in h
+  millisAtLastRun = currentMillis;
 
-  if (Kessel.Leistung > 1)
-    Kessel.Brennerstunden += deltat;  // if burning
-  Kessel.kwh += Kessel.Leistung * deltat;
-  kwhtimer = currentMillis;
+  if (Kessel.Leistung > 1) // if burning
+    Kessel.Brennerstunden += deltat; // in h
+  Kessel.kwh += Kessel.Leistung * deltat; // kW * h = kWh
 
   // Raumaustragung = SchneckenBunker or Saugturbine
   if (Kessel.Raumaustragung != oKessel.Raumaustragung) {
-    if (Kessel.Raumaustragung == 0) {  // switched off
-      Kessel.Austragungslaufzeit = (currentMillis - austragungStartedAtMillis) / 1000;
-      if (Kessel.Austragungslaufzeit > 800) Kessel.Austragungslaufzeit = 0;  // >800s ???
-      Kessel.AustragungsGesamtLaufzeit += Kessel.Austragungslaufzeit;
-    } else {  // switched on
+    if (Kessel.Raumaustragung == 0) { // Raumaustragung switched off
+      int austragungslaufzeit = (currentMillis - austragungStartedAtMillis) / 1000; // in seconds
+      if (austragungslaufzeit > 800) austragungslaufzeit = 0;  // >800s ??? probably because of misreadings
+      Kessel.AustragungsGesamtLaufzeit += austragungslaufzeit;
+    } else {                          // Raumaustragung switched on
       austragungStartedAtMillis = currentMillis;
     }
   }
