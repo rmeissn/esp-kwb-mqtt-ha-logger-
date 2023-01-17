@@ -165,6 +165,24 @@ void wifi_on() {
   wifiPreviousTime = millis();
 }
 
+void configureSensor(HASensorNumber sensor, char name[], char icon[], char unit[], char deviceClass[] = ""){
+  sensor.setIcon(icon);
+  sensor.setName(name);
+  sensor.setDeviceClass(deviceClass);
+  if (strcmp(deviceClass, "") != 0)
+    sensor.setUnitOfMeasurement(unit);
+}
+
+void configureSensor(HABinarySensor sensor, char name[], char icon[]){
+  sensor.setIcon(icon);
+  sensor.setName(name);
+}
+
+void configureSensor(HASensor sensor, char name[], char icon[]){
+  sensor.setIcon(icon);
+  sensor.setName(name);
+}
+
 ////////////////////// Setup //////////////////////////
 void setup() {
   wifi_on();
@@ -187,85 +205,32 @@ void setup() {
   device.enableLastWill();
 
   // configure sensors
-  puffer_oben.setIcon("mdi:thermometer");
-  puffer_oben.setName("Puffer Oben");
-  puffer_oben.setDeviceClass("temperature");
-  puffer_oben.setUnitOfMeasurement("°C");
-  puffer_unten.setIcon("mdi:thermometer");
-  puffer_unten.setName("Puffer Unten");
-  puffer_unten.setDeviceClass("temperature");
-  puffer_unten.setUnitOfMeasurement("°C");
-  boiler.setIcon("mdi:thermometer");
-  boiler.setName("Boiler");
-  boiler.setDeviceClass("temperature");
-  boiler.setUnitOfMeasurement("°C");
-  heizkreis_vorlauf.setIcon("mdi:thermometer");
-  heizkreis_vorlauf.setName("Heizkreis Vorlauf");
-  heizkreis_vorlauf.setDeviceClass("temperature");
-  heizkreis_vorlauf.setUnitOfMeasurement("°C");
-  heizkreis_aussen.setIcon("mdi:thermometer");
-  heizkreis_aussen.setName("Heizkreis Außen");
-  heizkreis_aussen.setDeviceClass("temperature");
-  heizkreis_aussen.setUnitOfMeasurement("°C");
-  kessel_ruecklauf.setIcon("mdi:thermometer");
-  kessel_ruecklauf.setName("Kessel Rücklauf");
-  kessel_ruecklauf.setDeviceClass("temperature");
-  kessel_ruecklauf.setUnitOfMeasurement("°C");
-  kessel_temperatur.setIcon("mdi:thermometer");
-  kessel_temperatur.setName("Kessel Temperatur");
-  kessel_temperatur.setDeviceClass("temperature");
-  kessel_temperatur.setUnitOfMeasurement("°C");
-  kessel_rauchgas.setIcon("mdi:thermometer");
-  kessel_rauchgas.setName("Kessel Rauchgas");
-  kessel_rauchgas.setDeviceClass("temperature");
-  kessel_rauchgas.setUnitOfMeasurement("°C");
-  kessel_reinigung.setIcon("mdi:hand-wash-outline");
-  kessel_reinigung.setName("Kessel Reinigung");
-  kessel_rauchsauger.setIcon("mdi:smoke");
-  kessel_rauchsauger.setName("Kessel Rauchsauger");
-  kessel_zuendung.setIcon("mdi:fire");
-  kessel_zuendung.setName("Kessel Zündung");
-  kessel_pumpe.setIcon("mdi:pump");
-  kessel_pumpe.setName("Kessel Pumpe");
-  kessel_heizkreispumpe.setIcon("mdi:pump");
-  kessel_heizkreispumpe.setName("Heizkreis Pumpe");
-  kessel_boilerpumpe.setIcon("mdi:pump");
-  kessel_boilerpumpe.setName("Boiler Pumpe");
-  kessel_raumaustragung.setIcon("mdi:warehouse");
-  kessel_raumaustragung.setName("Kessel Raumaustragung");
-  // kessel_anforderung.setIcon("mdi:thermometer-plus");
-  // kessel_anforderung.setName("Kessel Wärmeanforderung");
-  kessel_stoerung.setIcon("mdi:exclamation-thick");
-  kessel_stoerung.setName("Kessel Störung");
-  kessel.setIcon("mdi:gas-burner");
-  kessel.setName("Kessel Status");
-  kessel_photodiode.setIcon("mdi:lightbulb");
-  kessel_photodiode.setName("Kessel Photodiode");
-  kessel_photodiode.setUnitOfMeasurement("%");
-  kessel_geblaese.setIcon("mdi:fan");
-  kessel_geblaese.setName("Kessel Gebläse");
-  kessel_geblaese.setUnitOfMeasurement("rpm");
-  kessel_saugzug.setIcon("mdi:fan");
-  kessel_saugzug.setName("Kessel Saugzug");
-  kessel_saugzug.setUnitOfMeasurement("rpm");
-  kessel_energie.setIcon("mdi:counter");
-  kessel_energie.setName("Kessel Energie");
-  kessel_energie.setDeviceClass("energy");
-  kessel_energie.setUnitOfMeasurement("kWh");
-  kessel_brennerstunden.setIcon("mdi:clock-outline");
-  kessel_brennerstunden.setName("Kessel Brennerstunden");
-  kessel_brennerstunden.setDeviceClass("duration");
-  kessel_brennerstunden.setUnitOfMeasurement("h");
-  kessel_unterdruck.setIcon("mdi:gauge");
-  kessel_unterdruck.setName("Kessel Unterdruck");
-  kessel_unterdruck.setDeviceClass("pressure");
-  kessel_unterdruck.setUnitOfMeasurement("mbar");
-  kessel_drehrost.setIcon("mdi:grid");
-  kessel_drehrost.setName("Kessel Drehrost");
-  // .setIcon("mdi:thermometer");
-  // .setName("");
-  // .setDeviceClass("temperature");
-  // .setUnitOfMeasurement("°C");
+  configureSensor(puffer_oben, "Puffer Oben", "mdi:thermometer", "°C" , "temperature");
+  configureSensor(puffer_unten, "Puffer Unten", "mdi:thermometer", "°C" , "temperature");
+  configureSensor(boiler, "Boiler", "mdi:thermometer", "°C" , "temperature");
+  configureSensor(heizkreis_vorlauf, "Heizkreis Vorlauf", "mdi:thermometer", "°C" , "temperature");
+  configureSensor(heizkreis_aussen, "Heizkreis Außen", "mdi:thermometer", "°C" , "temperature");
+  configureSensor(kessel_ruecklauf, "Kessel Rücklauf", "mdi:thermometer", "°C" , "temperature");
+  configureSensor(kessel_temperatur, "Heizkreis Temperatur", "mdi:thermometer", "°C" , "temperature");
+  configureSensor(kessel_rauchgas, "Kessel Rauchgas", "mdi:thermometer", "°C" , "temperature");
+  configureSensor(kessel_energie, "Kessel Energie", "mdi:counter", "temperature", "kWh");
+  configureSensor(kessel_brennerstunden, "Kessel Brennerstunden", "mdi:clock-outline", "duration", "h");
+  configureSensor(kessel_unterdruck, "Kessel Unterdruck", "mdi:gauge", "pressure", "mbar");
+
+  configureSensor(kessel_reinigung, "Kessel Reinigung", "mdi:hand-wash-outline");
+  configureSensor(kessel_rauchsauger, "Kessel Rauchsauger", "mdi:smoke");
+  configureSensor(kessel_zuendung, "Kessel Zündung", "mdi:fire");
+  configureSensor(kessel_pumpe, "Kessel Pumpe", "mdi:pump");
+  configureSensor(kessel_heizkreispumpe, "Heizkreis Pumpe", "mdi:pump");
+  configureSensor(kessel_boilerpumpe, "Boiler Pumpe", "mdi:pump");
+  configureSensor(kessel_raumaustragung, "Kessel Raumaustragung", "mdi:warehouse");
+  // configureSensor(kessel_anforderung, "Kessel Wärmeanforderung", "mdi:thermometer-plus");
+  configureSensor(kessel_stoerung, "Kessel Störung", "mdi:exclamation-thick");
+  configureSensor(kessel, "Kessel Status", "mdi:gas-burner");
+  configureSensor(kessel_drehrost, "Kessel Drehrost", "mdi:grid");
+  configureSensor(kessel_photodiode, "Kessel Photodiode", "mdi:lightbulb", "%");
+  configureSensor(kessel_geblaese, "Kessel Gebläse", "mdi:fan", "rpm");
+  configureSensor(kessel_saugzug, "Kessel Saugzug", "mdi:fan", "rpm");
 
   mqtt.begin(MQTTSERVER, MQTTUSER, MQTTPASSWORD);
 
