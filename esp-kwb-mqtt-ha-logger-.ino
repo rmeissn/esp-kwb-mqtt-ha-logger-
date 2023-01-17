@@ -32,6 +32,7 @@ int updateEveryMinutes = 1;
 #include <math.h>
 
 // Globals ********************************************************************
+#define MSGMAXLENGTH 256 // in byte
 int HauptantriebsImpuls = 0;
 long Umdrehungen = 0, ZD = 0, AustragungsGesamtLaufzeit = 0;
 long NebenantriebsZeit = 0, HauptantriebsZeit = 0, HANAtimer = 0;  // HANAtimer = Timer zur Ausgabe der Hauptantrieb/Nebenantrieb Ratio
@@ -74,13 +75,13 @@ struct ef2 {
   double Geblaese = 0.0;
   double Leistung = 0.0;
   double Saugzug = 0.0;
-  double photo = 0.0;
-  double Puffer_unten = 0.0;
-  double Puffer_oben = 0.0;
-  double HK1_aussen = -100.0;
-  double HK1_Vorlauf = 0.0;
-  double Ruecklauf = 0.0;
-  double Boiler = 0.0;
+  double Photodiode = 0.0;
+  double Puffertemperatur_unten = 0.0;
+  double Puffertemperatur_oben = 0.0;
+  double HK1_Aussentemperatur = 0.0;
+  double HK1_Vorlauftemperatur = 0.0;
+  double Ruecklauftemperatur = 0.0;
+  double Boilertemperatur = 0.0;
   double Temp[20];
   int Reinigung = 0;
   int Zuendung = 0;
@@ -94,17 +95,17 @@ struct ef2 {
   int Hauptantrieb = 0;                 // Hauptantrieb Motorlaufzeit in Millisekunden
   int HauptantriebUmdrehungen = 0;      // Umdrehungen Stoker
   int DrehungSaugschlauch = 0;          // -1 left, 0 off, 1 right
-  int BoilerPumpe = 0;
-  int HeizkreisPumpe = 0;
-  int KesselPumpe = 0;                  // in %
+  int Boilerpumpe = 0;
+  int Heizkreispumpe = 0;
+  int Kesselpumpe = 0;                  // in %
   int RLAVentil = 0;                    // -1 close, 0 off, 1 open
-  int ext = 1;
+  int ext = 0;
   int Kesselstatus = 0;                 // 0 = Off, 1 = ignition, 2 = operation 3 = afterrun
-  int Heizkreismischer = 0;             // -1 close, 0 off, 1 open
+  int HK1_Heizkreismischer = 0;             // -1 close, 0 off, 1 open
   unsigned long HauptantriebsZeit = 1;  // Gesamt Hauptantriebszeit in Millisekunden
   unsigned long Hauptantriebtakt = 1;   // Taktzeit in Millisekunden
-  char ctrlMsg[32 * 8];                 // 32 byte
-  char senseMsg[32 * 8];                // 32 byte
+  char ctrlMsg[32 * 8 + 33];  // 32 * 0/1 + 33 * space as a String
+  char senseMsg[32 * 8 + 33]; // 32 * 0/1 + 33 * space as a String
 };
 
 struct ef2 Kessel, oKessel; // current and last boiler state
@@ -268,8 +269,7 @@ void setup() {
 
   mqtt.begin(MQTTSERVER, MQTTUSER, MQTTPASSWORD);
 
-  lastUpdateCycleMillis = millis();
-  timerd = millis();
+  lastUpdateCycleMillis = timerd = millis();
 }
 
 // String lowerPrecision(double in){
@@ -294,11 +294,26 @@ void debugLog(double value, char* formatter, char* topic) {
   mqtt.publish(topic, msg);
 }
 
+void publishValueToMQTTOnChange(int* current, int* old, char* topic) {
+  if (*current != *old) {
+    debugLog(*current, "%d", topic);
+    *old = *current;
+  }
+}
+
+void publishValueToHAOnChange(int* current, int* old, HABinarySensor target) {
+  if (*current != *old) {
+    target.setState(*current);
+    *old = *current;
+  }
+}
+
 // transforms a message to a byte string, so specific bits can be spotted, which are states of various components, e.g. 01100110 01...
 // Byte 0 to X -> Bit 0 to X
 // source = source byte array (1 char = 1 byte)
 // lengthInBytes = how many bytes shall be converted to bits
 // target = target, where to copy the resulting bit array (1 char per bit)
+// function from stackoverflow, tested to work correctly
 void recordMsgAsBinaryString(unsigned char* source, int lengthInBytes, char* target) {
   int s = 0;
   for (int i = 0; i < lengthInBytes; i++) {
@@ -323,25 +338,25 @@ void recordMsgAsBinaryString(unsigned char* source, int lengthInBytes, char* tar
 // dataLength = length of the data array in byte/chars
 void readCTRLMSGFrame(unsigned char* data, unsigned long currentMillis, int dataLength) {
   #ifdef PUBLISHUNKNOWN
-    int recordNoOfBytes = 17; // 0 to 16; what's there after byte 16?
+    int recordNoOfBytes = 17; // 0 to 16; what's there after byte 16?; max 32
     recordNoOfBytes = (recordNoOfBytes <= dataLength) ? recordNoOfBytes : dataLength;
     recordMsgAsBinaryString(data, recordNoOfBytes, Kessel.ctrlMsg);
   #endif
 
-  Kessel.HeizkreisPumpe = getBit(data, 1, 5);
+  Kessel.Heizkreispumpe = getBit(data, 1, 5);
   if (getBit(data, 1, 7) && getBit(data, 2, 0))            // 1 & 1 = close
-    Kessel.Heizkreismischer = -1;
+    Kessel.HK1_Heizkreismischer = -1;
   else if (getBit(data, 1, 7) && getBit(data, 2, 0) == 0)  // 1 & 0 = open
-    Kessel.Heizkreismischer = 1;
+    Kessel.HK1_Heizkreismischer = 1;
   else                                                     // 0 & 0 = off
-    Kessel.Heizkreismischer = 0;
+    Kessel.HK1_Heizkreismischer = 0;
   if (getBit(data, 2, 3) && getBit(data, 2, 4))            // 1 & 1 = open
     Kessel.RLAVentil = 1;
   else if (getBit(data, 2, 3) && getBit(data, 2, 4) == 0)  // 1 & 0 = close
     Kessel.RLAVentil = -1;
   else                                                     // 0 & 0 = off
     Kessel.RLAVentil = 0;
-  Kessel.BoilerPumpe = getBit(data, 2, 5);
+  Kessel.Boilerpumpe = getBit(data, 2, 5);
   Kessel.Stoerung1 = 1 - getBit(data, 3, 0);
   Kessel.Drehrost = getBit(data, 3, 6);
   Kessel.Reinigung = getBit(data, 3, 7);
@@ -352,7 +367,7 @@ void readCTRLMSGFrame(unsigned char* data, unsigned long currentMillis, int data
   else                                                      // off
     Kessel.DrehungSaugschlauch = 0;
   Kessel.Rauchsauger = getBit(data, 4, 5);
-  Kessel.KesselPumpe = (getValue(data, 8, 1, 1, false) / 255) * 100;
+  Kessel.Kesselpumpe = (getValue(data, 8, 1, 1, false) / 255) * 100;
   Kessel.Raumaustragung = getBit(data, 9, 2) || getBit(data, 9, 5); // Schnecke || Saugturbine
   Kessel.Hauptantriebtakt = getValue(data, 10, 2, 10, false);
   Kessel.Hauptantrieb = getValue(data, 12, 2, 10, false);
@@ -394,7 +409,7 @@ void readCTRLMSGFrame(unsigned char* data, unsigned long currentMillis, int data
 void readSenseMSGFrame(unsigned char* data, unsigned long currentMillis, int dataLength) {
   // States at byte 3 and 4 (maybe 0 to 5?)
   #ifdef PUBLISHUNKNOWN
-    int recordNoOfBytes = 6; // 0 to 5; 6 - 23 are known, see below
+    int recordNoOfBytes = 6; // 0 to 5; 6 - 23 are known, see below; max 32
     recordNoOfBytes = (recordNoOfBytes <= dataLength) ? recordNoOfBytes : dataLength;
     recordMsgAsBinaryString(data, recordNoOfBytes, Kessel.senseMsg);
   #endif
@@ -402,17 +417,17 @@ void readSenseMSGFrame(unsigned char* data, unsigned long currentMillis, int dat
   Kessel.Hauptantriebimpuls = getBit(data, 3, 7);
   Kessel.ext = getBit(data, 4, 7);
   // sensor values at the follwing bytes, 2 bytes per value
-  Kessel.HK1_Vorlauf = getValue(data, 6, 2, 0.1, true);
-  Kessel.Ruecklauf = getValue(data, 8, 2, 0.1, true);
-  Kessel.Boiler = getValue(data, 10, 2, 0.1, true);
+  Kessel.HK1_Vorlauftemperatur = getValue(data, 6, 2, 0.1, true);
+  Kessel.Ruecklauftemperatur = getValue(data, 8, 2, 0.1, true);
+  Kessel.Boilertemperatur = getValue(data, 10, 2, 0.1, true);
   Kessel.Kesseltemperatur = getValue(data, 12, 2, 0.1, true);
-  Kessel.Puffer_unten = getValue(data, 14, 2, 0.1, true);
-  Kessel.Puffer_oben = getValue(data, 16, 2, 0.1, true);
-  Kessel.HK1_aussen = getValue(data, 18, 2, 0.1, true);
+  Kessel.Puffertemperatur_unten = getValue(data, 14, 2, 0.1, true);
+  Kessel.Puffertemperatur_oben = getValue(data, 16, 2, 0.1, true);
+  Kessel.HK1_Aussentemperatur = getValue(data, 18, 2, 0.1, true);
   Kessel.Rauchgastemperatur = getValue(data, 20, 2, 0.1, true);
   Kessel.Proztemperatur = getValue(data, 22, 2, 0.1, true);
   // see loop for 24 to 31
-  Kessel.photo = getValue(data, 32, 2, 0.1, true);
+  Kessel.Photodiode = getValue(data, 32, 2, 0.1, true);
   Kessel.Unterdruck = getValue(data, 34, 2, 0.1, true);
   // see loop for 36 to 68
   Kessel.Saugzug = getValue(data, 69, 2, 0.6, false);
@@ -432,10 +447,10 @@ void readSenseMSGFrame(unsigned char* data, unsigned long currentMillis, int dat
   #endif
 
   // Range photo -221 to 127 - 348 numbers; x + 255 - offset to zero / range -> 0 to 1 * 100 -> range 0 to 100
-  Kessel.photo = round(((Kessel.photo + 221.0) / 348) * 100);
-  Kessel.photo = (Kessel.photo < 0) ? 0 : (Kessel.photo > 100) ? 100 : Kessel.photo;
+  Kessel.Photodiode = round(((Kessel.Photodiode + 221.0) / 348) * 100);
+  Kessel.Photodiode = (Kessel.Photodiode < 0) ? 0 : (Kessel.Photodiode > 100) ? 100 : Kessel.Photodiode;
   // old way
-  // Kessel.photo = ((int) (Kessel.photo + 255.0) * 100) >> 9; // Result range 6 to 74
+  // Kessel.Photodiode = ((int) (Kessel.Photodiode + 255.0) * 100) >> 9; // Result range 6 to 74
 
   // TODO review the below code
   // zwei gleiche impulse, die vom akt. unterschiedlich sind
@@ -454,11 +469,11 @@ void publishFastChangingValues() {
   #ifdef PUBLISHUNKNOWN
     if (strcmp(Kessel.senseMsg, oKessel.senseMsg) != 0) {
       mqtt.publish("kwb/senseMsg", Kessel.senseMsg);
-      memcpy(&(oKessel.senseMsg), &(Kessel.senseMsg), sizeof (Kessel.senseMsg));
+      memcpy(&(oKessel.senseMsg), &(Kessel.senseMsg), sizeof(Kessel.senseMsg));
     }
     if (strcmp(Kessel.ctrlMsg, oKessel.ctrlMsg) != 0) {
       mqtt.publish("kwb/ctrlMsg", Kessel.ctrlMsg);
-      memcpy(&(oKessel.ctrlMsg), &(Kessel.ctrlMsg), sizeof (Kessel.ctrlMsg));
+      memcpy(&(oKessel.ctrlMsg), &(Kessel.ctrlMsg), sizeof(Kessel.ctrlMsg));
     }
 
     for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
@@ -472,81 +487,28 @@ void publishFastChangingValues() {
     }
   #endif
 
-  if (Kessel.BoilerPumpe != oKessel.BoilerPumpe) {
-    kessel_boilerpumpe.setState(Kessel.BoilerPumpe);
-    oKessel.BoilerPumpe = Kessel.BoilerPumpe;
-  }
+  publishValueToMQTTOnChange(&(Kessel.HK1_Heizkreismischer), &(oKessel.HK1_Heizkreismischer), "kwb/Heizkreismischer");
+  publishValueToMQTTOnChange(&(Kessel.DrehungSaugschlauch), &(oKessel.DrehungSaugschlauch), "kwb/DrehungSaugschlauch");
+  publishValueToMQTTOnChange(&(Kessel.RLAVentil), &(oKessel.RLAVentil), "kwb/RLAVentil");
 
-  if (Kessel.HeizkreisPumpe != oKessel.HeizkreisPumpe) {
-    kessel_heizkreispumpe.setState(Kessel.HeizkreisPumpe);
-    oKessel.HeizkreisPumpe = Kessel.HeizkreisPumpe;
-  }
+  publishValueToHAOnChange(&(Kessel.Boilerpumpe), &(oKessel.Boilerpumpe), kessel_boilerpumpe);
+  publishValueToHAOnChange(&(Kessel.Heizkreispumpe), &(oKessel.Heizkreispumpe), kessel_heizkreispumpe);
+  publishValueToHAOnChange(&(Kessel.Rauchsauger), &(oKessel.Rauchsauger), kessel_rauchsauger);
+  publishValueToHAOnChange(&(Kessel.Drehrost), &(oKessel.Drehrost), kessel_drehrost);
+  publishValueToHAOnChange(&(Kessel.Raumaustragung), &(oKessel.Raumaustragung), kessel_raumaustragung);
+  publishValueToHAOnChange(&(Kessel.Reinigung), &(oKessel.Reinigung), kessel_reinigung);
+  publishValueToHAOnChange(&(Kessel.Zuendung), &(oKessel.Zuendung), kessel_zuendung);
 
-  if (Kessel.Heizkreismischer != oKessel.Heizkreismischer) {
-    debugLog(Kessel.Heizkreismischer, "%d", "kwb/Heizkreismischer");
-    oKessel.Heizkreismischer = Kessel.Heizkreismischer;
-  }
-
-  if (Kessel.DrehungSaugschlauch != oKessel.DrehungSaugschlauch) {
-    debugLog(Kessel.DrehungSaugschlauch, "%d", "kwb/DrehungSaugschlauch");
-    oKessel.DrehungSaugschlauch = Kessel.DrehungSaugschlauch;
-  }
-
-  if (Kessel.RLAVentil != oKessel.RLAVentil) {
-    debugLog(Kessel.RLAVentil, "%d", "kwb/RLAVentil");
-    oKessel.RLAVentil = Kessel.RLAVentil;
-  }
-
-  if (Kessel.Rauchsauger != oKessel.Rauchsauger) {
-    kessel_rauchsauger.setState(Kessel.Rauchsauger);
-    oKessel.Rauchsauger = Kessel.Rauchsauger;
-  }
-
-  if (Kessel.Drehrost != oKessel.Drehrost) {
-    kessel_drehrost.setState(Kessel.Drehrost);
-    oKessel.Drehrost = Kessel.Drehrost;
-  }
-
-  if (abs(Kessel.photo - oKessel.photo) >= 5) {
-    kessel_photodiode.setValue((int)Kessel.photo);
-    oKessel.photo = Kessel.photo;
-  }
-
-  if (Kessel.Raumaustragung != oKessel.Raumaustragung) {
-    kessel_raumaustragung.setState(Kessel.Raumaustragung);
-    oKessel.Raumaustragung = Kessel.Raumaustragung;
-  }
-
-  if (Kessel.Reinigung != oKessel.Reinigung) {
-    kessel_reinigung.setState(Kessel.Reinigung);
-    oKessel.Reinigung = Kessel.Reinigung;
-  }
-
-  if (Kessel.Zuendung != oKessel.Zuendung) {
-    debugLog(Kessel.Zuendung, "%d", "kwb/zuendung");  // never switched to 1 yet?
-    kessel_zuendung.setState(Kessel.Zuendung);
-    oKessel.Zuendung = Kessel.Zuendung;
+  if (abs(Kessel.Photodiode - oKessel.Photodiode) >= 5) {
+    kessel_photodiode.setValue((int)Kessel.Photodiode);
+    oKessel.Photodiode = Kessel.Photodiode;
   }
 }
 
-// values which change quite slowly
-// currentMillis =  current milliseconds the MCU is on
-void publishSlowlyChangingValues(unsigned long currentMillis) {
-  puffer_oben.setValue(float(Kessel.Puffer_oben));
-  puffer_unten.setValue(float(Kessel.Puffer_unten));
-  boiler.setValue(float(Kessel.Boiler));
-  heizkreis_vorlauf.setValue(float(Kessel.HK1_Vorlauf));
-  heizkreis_aussen.setValue(float(Kessel.HK1_aussen));
-  kessel_ruecklauf.setValue(float(Kessel.Ruecklauf));
-  kessel_temperatur.setValue(float(Kessel.Kesseltemperatur));
-  kessel_rauchgas.setValue(float(Kessel.Rauchgastemperatur));
-  kessel_pumpe.setState(Kessel.KesselPumpe == 100);
-  kessel_geblaese.setValue(float(Kessel.Geblaese));
-  kessel_saugzug.setValue(float(Kessel.Saugzug));
-
+void publishBoilerStateToHA (unsigned long currentMillis) {
   int oldStat = oKessel.Kesselstatus;
   if (oldStat == 0) { // Off
-    if(currentMillis <= 2 * 60 *1000 && (Kessel.photo >= 50 && Kessel.Rauchgastemperatur >= 70)) { // device just started - might be burning
+    if(currentMillis <= 2 * 60 *1000 && (Kessel.Photodiode >= 50 && Kessel.Rauchgastemperatur >= 70)) { // device just started - might be burning
       kessel.setValue("Brennt");
       Kessel.Kesselstatus = 2;
     } else if (Kessel.Geblaese > 300){
@@ -557,22 +519,38 @@ void publishSlowlyChangingValues(unsigned long currentMillis) {
     kessel.setValue("Brennt");
     Kessel.Kesselstatus = 2;
   }
-    // switches too often to afterrun, photo < 50 is already good, but geblase not - needs more/better conditions
-  // } else if (oldStat == 2 && Kessel.photo < 50 && Kessel.Geblaese > 2200) { // Burned & expires
+    // switches too often to afterrun, Photodiode < 50 is already good, but geblase not - needs more/better conditions
+  // } else if (oldStat == 2 && Kessel.Photodiode < 50 && Kessel.Geblaese > 2200) { // Burned & expires
   //   kessel.setValue("Nachlauf");
   //   Kessel.Kesselstatus = 3;
   // }
-  if (Kessel.photo < 20 && Kessel.Geblaese < 300) { // turn off and emergency escape
+  if (Kessel.Photodiode < 20 && Kessel.Geblaese < 300) { // turn off and emergency escape
     kessel.setValue("Aus");
     Kessel.Kesselstatus = 0;
   }
+}
 
-  // debugLog(Kessel.ext, "%d", "kwb/anforderung");
-  // kessel_anforderung.setState((((int)(Kessel.ext)) == 0) ? false : true);
+// values which change quite slowly
+// currentMillis =  current milliseconds the MCU is on
+void publishSlowlyChangingValues(unsigned long currentMillis) {
+  puffer_oben.setValue(float(Kessel.Puffertemperatur_oben));
+  puffer_unten.setValue(float(Kessel.Puffertemperatur_unten));
+  boiler.setValue(float(Kessel.Boilertemperatur));
+  heizkreis_vorlauf.setValue(float(Kessel.HK1_Vorlauftemperatur));
+  heizkreis_aussen.setValue(float(Kessel.HK1_Aussentemperatur));
+  kessel_ruecklauf.setValue(float(Kessel.Ruecklauftemperatur));
+  kessel_temperatur.setValue(float(Kessel.Kesseltemperatur));
+  kessel_rauchgas.setValue(float(Kessel.Rauchgastemperatur));
+  kessel_pumpe.setState(Kessel.Kesselpumpe == 100);
+  kessel_geblaese.setValue(float(Kessel.Geblaese));
+  kessel_saugzug.setValue(float(Kessel.Saugzug));
   kessel_energie.setValue(float(Kessel.kwh));
   kessel_stoerung.setState(Kessel.Stoerung1);
   kessel_brennerstunden.setValue(float(Kessel.Brennerstunden));
   kessel_unterdruck.setValue(float(Kessel.Unterdruck));
+  // kessel_anforderung.setState((((int)(Kessel.ext)) == 0) ? false : true); // Anfordung not on ext for my boiler
+
+  publishBoilerStateToHA(currentMillis);
 }
 
 // TODO review the code of this function
@@ -639,7 +617,7 @@ void otherStuff(unsigned long currentMillis) {
 ///////////////////// Main Loop //////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////
 void loop() {
-  unsigned char msgData[256];
+  unsigned char msgData[MSGMAXLENGTH];
   int dataLength, msgID, frameID;
 
   mqtt.loop();
