@@ -140,7 +140,7 @@ HASensorNumber kessel_energie("kwb_kessel_energie", HASensorNumber::PrecisionP3)
 HASensorNumber kessel_brennerstunden("kwb_kessel_brennerstunden", HASensorNumber::PrecisionP3);
 HASensorNumber kessel_unterdruck("kwb_kessel_unterdruck", HASensorNumber::PrecisionP1);
 
-void wifiReconnectIfLost(unsigned long currentTime) {
+void wifiReconnectIfLost(unsigned long &currentTime) {
   if ((WiFi.status() != WL_CONNECTED) && (currentTime - wifiPreviousTime >= wifiReconnectDelay * 60 * 10)) {
     WiFi.disconnect();
     WiFi.reconnect();
@@ -241,7 +241,7 @@ void setup() {
 //   return String(tmp);
 // }
 
-bool tempdiff(double a, double b, double diff) {
+bool tempdiff(double &a, double &b, double &diff) {
   return (abs(a - b) >= diff);
 }
 
@@ -263,17 +263,17 @@ void debugLog(double value, char* formatter, char* topic) {
   mqtt.publish(topic, msg);
 }
 
-void publishValueToMQTTOnChange(int* current, int* old, char* topic) {
-  if (*current != *old) {
-    debugLog(*current, "%d", topic);
-    *old = *current;
+void publishValueToMQTTOnChange(int &current, int &old, char* topic) {
+  if (current != old) {
+    debugLog(current, "%d", topic);
+    old = current;
   }
 }
 
-void publishValueToHAOnChange(int* current, int* old, HABinarySensor target) {
-  if (*current != *old) {
-    target.setState(*current);
-    *old = *current;
+void publishValueToHAOnChange(int &current, int &old, HABinarySensor &target) {
+  if (current != old) {
+    target.setState(current);
+    old = current;
   }
 }
 
@@ -305,7 +305,7 @@ void recordMsgAsBinaryString(unsigned char* source, int lengthInBytes, char* tar
 // data = data char array (1 char = 1 byte) = read message
 // currentMillis = current milliseconds the MCU is online
 // dataLength = length of the data array in byte/chars
-void readCTRLMSGFrame(unsigned char* data, unsigned long currentMillis, int dataLength) {
+void readCTRLMSGFrame(unsigned char* data, unsigned long &currentMillis, int dataLength) {
   #ifdef PUBLISHUNKNOWN
     int recordNoOfBytes = 17; // 0 to 16; what's there after byte 16?; max 32
     recordNoOfBytes = (recordNoOfBytes <= dataLength) ? recordNoOfBytes : dataLength;
@@ -373,7 +373,7 @@ void readCTRLMSGFrame(unsigned char* data, unsigned long currentMillis, int data
 // data = data char array (1 char = 1 byte) = read message
 // currentMillis = current milliseconds the MCU is online
 // dataLength = length of the data array in byte/chars
-void readSenseMSGFrame(unsigned char* data, unsigned long currentMillis, int dataLength) {
+void readSenseMSGFrame(unsigned char* data, unsigned long &currentMillis, int dataLength) {
   // States at byte 3 and 4 (maybe 0 to 5?)
   #ifdef PUBLISHUNKNOWN
     int recordNoOfBytes = 6; // 0 to 5; 6 - 23 are known, see below; max 32
@@ -454,17 +454,17 @@ void publishFastChangingValues() {
     }
   #endif
 
-  publishValueToMQTTOnChange(&(Kessel.HK1_Heizkreismischer), &(oKessel.HK1_Heizkreismischer), "kwb/Heizkreismischer");
-  publishValueToMQTTOnChange(&(Kessel.DrehungSaugschlauch), &(oKessel.DrehungSaugschlauch), "kwb/DrehungSaugschlauch");
-  publishValueToMQTTOnChange(&(Kessel.RLAVentil), &(oKessel.RLAVentil), "kwb/RLAVentil");
+  publishValueToMQTTOnChange(Kessel.HK1_Heizkreismischer, oKessel.HK1_Heizkreismischer, "kwb/Heizkreismischer");
+  publishValueToMQTTOnChange(Kessel.DrehungSaugschlauch, oKessel.DrehungSaugschlauch, "kwb/DrehungSaugschlauch");
+  publishValueToMQTTOnChange(Kessel.RLAVentil, oKessel.RLAVentil, "kwb/RLAVentil");
 
-  publishValueToHAOnChange(&(Kessel.Boilerpumpe), &(oKessel.Boilerpumpe), kessel_boilerpumpe);
-  publishValueToHAOnChange(&(Kessel.Heizkreispumpe), &(oKessel.Heizkreispumpe), kessel_heizkreispumpe);
-  publishValueToHAOnChange(&(Kessel.Rauchsauger), &(oKessel.Rauchsauger), kessel_rauchsauger);
-  publishValueToHAOnChange(&(Kessel.Drehrost), &(oKessel.Drehrost), kessel_drehrost);
-  publishValueToHAOnChange(&(Kessel.Raumaustragung), &(oKessel.Raumaustragung), kessel_raumaustragung);
-  publishValueToHAOnChange(&(Kessel.Reinigung), &(oKessel.Reinigung), kessel_reinigung);
-  publishValueToHAOnChange(&(Kessel.Zuendung), &(oKessel.Zuendung), kessel_zuendung);
+  publishValueToHAOnChange(Kessel.Boilerpumpe, oKessel.Boilerpumpe, kessel_boilerpumpe);
+  publishValueToHAOnChange(Kessel.Heizkreispumpe, oKessel.Heizkreispumpe, kessel_heizkreispumpe);
+  publishValueToHAOnChange(Kessel.Rauchsauger, oKessel.Rauchsauger, kessel_rauchsauger);
+  publishValueToHAOnChange(Kessel.Drehrost, oKessel.Drehrost, kessel_drehrost);
+  publishValueToHAOnChange(Kessel.Raumaustragung, oKessel.Raumaustragung, kessel_raumaustragung);
+  publishValueToHAOnChange(Kessel.Reinigung, oKessel.Reinigung, kessel_reinigung);
+  publishValueToHAOnChange(Kessel.Zuendung, oKessel.Zuendung, kessel_zuendung);
 
   if (abs(Kessel.Photodiode - oKessel.Photodiode) >= 5) {
     kessel_photodiode.setValue((int)Kessel.Photodiode);
@@ -472,7 +472,7 @@ void publishFastChangingValues() {
   }
 }
 
-void publishBoilerStateToHA (unsigned long currentMillis) {
+void publishBoilerStateToHA (unsigned long &currentMillis) {
   int oldStat = oKessel.Kesselstatus;
   if (oldStat == 0) { // Off
     if(currentMillis <= 2 * 60 *1000 && (Kessel.Photodiode >= 50 && Kessel.Rauchgastemperatur >= 70)) { // device just started - might be burning
@@ -499,7 +499,7 @@ void publishBoilerStateToHA (unsigned long currentMillis) {
 
 // values which change quite slowly
 // currentMillis =  current milliseconds the MCU is on
-void publishSlowlyChangingValues(unsigned long currentMillis) {
+void publishSlowlyChangingValues(unsigned long &currentMillis) {
   puffer_oben.setValue(float(Kessel.Puffertemperatur_oben));
   puffer_unten.setValue(float(Kessel.Puffertemperatur_unten));
   boiler.setValue(float(Kessel.Boilertemperatur));
@@ -522,7 +522,7 @@ void publishSlowlyChangingValues(unsigned long currentMillis) {
 
 // TODO review the code of this function
 // currentMillis =  current milliseconds the MCU is on
-void otherStuff(unsigned long currentMillis) {
+void otherStuff(unsigned long &currentMillis) {
   // kessel_proztemperatur.setValue(float(Kessel.Proztemperatur)); // HASensorNumber %.1f
   // kessel_HauptantriebUmdrehungen.setValue(Kessel.HauptantriebUmdrehungen); // HASensorNumber int
   // kessel_HauptantriebsZeit.setValue(Kessel.HauptantriebsZeit); // HASensorNumber int
