@@ -209,7 +209,7 @@ void setup() {
   configureSensor(heizkreis_vorlauf, "Heizkreis Vorlauf", "mdi:thermometer", "°C" , "temperature");
   configureSensor(heizkreis_aussen, "Heizkreis Außen", "mdi:thermometer", "°C" , "temperature");
   configureSensor(kessel_ruecklauf, "Kessel Rücklauf", "mdi:thermometer", "°C" , "temperature");
-  configureSensor(kessel_temperatur, "Heizkreis Temperatur", "mdi:thermometer", "°C" , "temperature");
+  configureSensor(kessel_temperatur, "Kessel Temperatur", "mdi:thermometer", "°C" , "temperature");
   configureSensor(kessel_rauchgas, "Kessel Rauchgas", "mdi:thermometer", "°C" , "temperature");
   configureSensor(kessel_energie, "Kessel Energie", "mdi:counter", "kWh", "temperature");
   configureSensor(kessel_brennerstunden, "Kessel Brennerstunden", "mdi:clock-outline", "h" , "duration");
