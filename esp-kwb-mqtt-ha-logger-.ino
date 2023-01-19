@@ -163,20 +163,20 @@ void wifi_on() {
   wifiPreviousTime = millis();
 }
 
-void configureSensor(HASensorNumber sensor, char name[], char icon[], char unit[], char deviceClass[] = ""){
+void configureSensor(HASensorNumber &sensor, const char name[], const char icon[], const char unit[], const char deviceClass[]){
   sensor.setIcon(icon);
   sensor.setName(name);
-  sensor.setDeviceClass(deviceClass);
-  if (strcmp(deviceClass, "") != 0)
-    sensor.setUnitOfMeasurement(unit);
+  sensor.setUnitOfMeasurement(unit);
+  if (strlen(deviceClass) != 0)
+    sensor.setDeviceClass(deviceClass);
 }
 
-void configureSensor(HABinarySensor sensor, char name[], char icon[]){
+void configureSensor(HABinarySensor &sensor, const char name[], const char icon[]){
   sensor.setIcon(icon);
   sensor.setName(name);
 }
 
-void configureSensor(HASensor sensor, char name[], char icon[]){
+void configureSensor(HASensor &sensor, const char name[], const char icon[]){
   sensor.setIcon(icon);
   sensor.setName(name);
 }
@@ -211,9 +211,9 @@ void setup() {
   configureSensor(kessel_ruecklauf, "Kessel Rücklauf", "mdi:thermometer", "°C" , "temperature");
   configureSensor(kessel_temperatur, "Heizkreis Temperatur", "mdi:thermometer", "°C" , "temperature");
   configureSensor(kessel_rauchgas, "Kessel Rauchgas", "mdi:thermometer", "°C" , "temperature");
-  configureSensor(kessel_energie, "Kessel Energie", "mdi:counter", "temperature", "kWh");
-  configureSensor(kessel_brennerstunden, "Kessel Brennerstunden", "mdi:clock-outline", "duration", "h");
-  configureSensor(kessel_unterdruck, "Kessel Unterdruck", "mdi:gauge", "pressure", "mbar");
+  configureSensor(kessel_energie, "Kessel Energie", "mdi:counter", "kWh", "temperature");
+  configureSensor(kessel_brennerstunden, "Kessel Brennerstunden", "mdi:clock-outline", "h" , "duration");
+  configureSensor(kessel_unterdruck, "Kessel Unterdruck", "mdi:gauge", "mbar", "pressure");
 
   configureSensor(kessel_reinigung, "Kessel Reinigung", "mdi:hand-wash-outline");
   configureSensor(kessel_rauchsauger, "Kessel Rauchsauger", "mdi:smoke");
@@ -226,9 +226,9 @@ void setup() {
   configureSensor(kessel_stoerung, "Kessel Störung", "mdi:exclamation-thick");
   configureSensor(kessel, "Kessel Status", "mdi:gas-burner");
   configureSensor(kessel_drehrost, "Kessel Drehrost", "mdi:grid");
-  configureSensor(kessel_photodiode, "Kessel Photodiode", "mdi:lightbulb", "%");
-  configureSensor(kessel_geblaese, "Kessel Gebläse", "mdi:fan", "rpm");
-  configureSensor(kessel_saugzug, "Kessel Saugzug", "mdi:fan", "rpm");
+  configureSensor(kessel_photodiode, "Kessel Photodiode", "mdi:lightbulb", "%", "");
+  configureSensor(kessel_geblaese, "Kessel Gebläse", "mdi:fan", "rpm", "");
+  configureSensor(kessel_saugzug, "Kessel Saugzug", "mdi:fan", "rpm", "");
 
   mqtt.begin(MQTTSERVER, MQTTUSER, MQTTPASSWORD);
 
