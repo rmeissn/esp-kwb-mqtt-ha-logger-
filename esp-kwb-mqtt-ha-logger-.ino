@@ -55,8 +55,8 @@ extern long errorcounter;
 // nied Fallrohrstand 160 Umdrehungen auf 200gr = 1.25 (???)
 // Nebenantrieb/Schnecke: 1990gr mit 373 s = 5.34 gr/s (passt)
 
-double Nebenantriebsfaktor = 5.4;
-double Hauptantriebsfakter = (400.0 / 128.0);  // 400g in 120sek. > 3.333 g/s
+float Nebenantriebsfaktor = 5.4;
+float Hauptantriebsfakter = (400 / 128.0);  // 400g in 120sek. > 3.333 g/s
 
 unsigned long timerd = 0, lastUpdateCycleMillis = 0;
 unsigned long austragungStartedAtMillis = 0;
@@ -65,23 +65,23 @@ unsigned long wifiPreviousTime = 0;
 int wifiReconnectDelay = 5; //mins
 
 struct ef2 {
-  double kwh = 0.1;
-  double Rauchgastemperatur = 0.0;
-  double Proztemperatur = 0.0;          // Prozessortemperatur? Temperatur der Steuerung?
-  double Unterdruck = 0.0;
-  double Brennerstunden = 0.0;
-  double Kesseltemperatur = 0.0;
-  double Geblaese = 0.0;
-  double Leistung = 0.0;
-  double Saugzug = 0.0;
-  double Photodiode = 0.0;
-  double Puffertemperatur_unten = 0.0;
-  double Puffertemperatur_oben = 0.0;
-  double HK1_Aussentemperatur = 0.0;
-  double HK1_Vorlauftemperatur = 0.0;
-  double Ruecklauftemperatur = 0.0;
-  double Boilertemperatur = 0.0;
-  double Temp[20];
+  float kwh = 0.1;
+  float Rauchgastemperatur = 0.0;
+  float Proztemperatur = 0.0;          // Prozessortemperatur? Temperatur der Steuerung?
+  float Unterdruck = 0.0;
+  float Brennerstunden = 0.0;
+  float Kesseltemperatur = 0.0;
+  float Geblaese = 0.0;
+  float Leistung = 0.0;
+  float Saugzug = 0.0;
+  float Photodiode = 0.0;
+  float Puffertemperatur_unten = 0.0;
+  float Puffertemperatur_oben = 0.0;
+  float HK1_Aussentemperatur = 0.0;
+  float HK1_Vorlauftemperatur = 0.0;
+  float Ruecklauftemperatur = 0.0;
+  float Boilertemperatur = 0.0;
+  float Temp[20];
   int Reinigung = 0;
   int Zuendung = 0;
   int Drehrost = 0;
@@ -235,13 +235,13 @@ void setup() {
   lastUpdateCycleMillis = timerd = millis();
 }
 
-// String lowerPrecision(double in){
+// String lowerPrecision(float in){
 //   char tmp[64];
 //   sprintf(tmp, "%.1f", in);
 //   return String(tmp);
 // }
 
-bool tempdiff(double &a, double &b, double &diff) {
+bool tempdiff(float &a, float &b, float &diff) {
   return (abs(a - b) >= diff);
 }
 
@@ -257,7 +257,7 @@ void debugLog(unsigned long value, char* formatter, char* topic) {
   mqtt.publish(topic, msg);
 }
 
-void debugLog(double value, char* formatter, char* topic) {
+void debugLog(float value, char* formatter, char* topic) {
   char msg[64];
   sprintf(msg, formatter, value);
   mqtt.publish(topic, msg);
@@ -350,7 +350,7 @@ void readCTRLMSGFrame(unsigned char* data, unsigned long &currentMillis, int dat
   oKessel.Hauptantrieb = Kessel.Hauptantrieb;
   oKessel.Hauptantriebtakt = Kessel.Hauptantriebtakt;
 
-  double deltat = (currentMillis - millisAtLastRun) / (3600 * 1000.0); // in h
+  float deltat = (currentMillis - millisAtLastRun) / (3600 * 1000.0); // in h
   millisAtLastRun = currentMillis;
 
   if (Kessel.Leistung > 1) // if burning
@@ -500,21 +500,21 @@ void publishBoilerStateToHA (unsigned long &currentMillis) {
 // values which change quite slowly
 // currentMillis =  current milliseconds the MCU is on
 void publishSlowlyChangingValues(unsigned long &currentMillis) {
-  puffer_oben.setValue(float(Kessel.Puffertemperatur_oben));
-  puffer_unten.setValue(float(Kessel.Puffertemperatur_unten));
-  boiler.setValue(float(Kessel.Boilertemperatur));
-  heizkreis_vorlauf.setValue(float(Kessel.HK1_Vorlauftemperatur));
-  heizkreis_aussen.setValue(float(Kessel.HK1_Aussentemperatur));
-  kessel_ruecklauf.setValue(float(Kessel.Ruecklauftemperatur));
-  kessel_temperatur.setValue(float(Kessel.Kesseltemperatur));
-  kessel_rauchgas.setValue(float(Kessel.Rauchgastemperatur));
+  puffer_oben.setValue(Kessel.Puffertemperatur_oben);
+  puffer_unten.setValue(Kessel.Puffertemperatur_unten);
+  boiler.setValue(Kessel.Boilertemperatur);
+  heizkreis_vorlauf.setValue(Kessel.HK1_Vorlauftemperatur);
+  heizkreis_aussen.setValue(Kessel.HK1_Aussentemperatur);
+  kessel_ruecklauf.setValue(Kessel.Ruecklauftemperatur);
+  kessel_temperatur.setValue(Kessel.Kesseltemperatur);
+  kessel_rauchgas.setValue(Kessel.Rauchgastemperatur);
   kessel_pumpe.setState(Kessel.Kesselpumpe == 100);
-  kessel_geblaese.setValue(float(Kessel.Geblaese));
-  kessel_saugzug.setValue(float(Kessel.Saugzug));
-  kessel_energie.setValue(float(Kessel.kwh));
+  kessel_geblaese.setValue(Kessel.Geblaese);
+  kessel_saugzug.setValue(Kessel.Saugzug);
+  kessel_energie.setValue(Kessel.kwh);
   kessel_stoerung.setState(Kessel.Stoerung1);
-  kessel_brennerstunden.setValue(float(Kessel.Brennerstunden));
-  kessel_unterdruck.setValue(float(Kessel.Unterdruck));
+  kessel_brennerstunden.setValue(Kessel.Brennerstunden);
+  kessel_unterdruck.setValue(Kessel.Unterdruck);
   // kessel_anforderung.setState((((int)(Kessel.ext)) == 0) ? false : true); // Anfordung not on ext for my boiler
 
   publishBoilerStateToHA(currentMillis);
@@ -523,12 +523,12 @@ void publishSlowlyChangingValues(unsigned long &currentMillis) {
 // TODO review the code of this function
 // currentMillis =  current milliseconds the MCU is on
 void otherStuff(unsigned long &currentMillis) {
-  // kessel_proztemperatur.setValue(float(Kessel.Proztemperatur)); // HASensorNumber %.1f
+  // kessel_proztemperatur.setValue(Kessel.Proztemperatur); // HASensorNumber %.1f
   // kessel_HauptantriebUmdrehungen.setValue(Kessel.HauptantriebUmdrehungen); // HASensorNumber int
   // kessel_HauptantriebsZeit.setValue(Kessel.HauptantriebsZeit); // HASensorNumber int
-  // kessel_hauptantriebtakt.setValue(float(Kessel.Hauptantriebtakt / 1000.0)); // HASensorNumber %2.1f
-  // kessel_pellets.setValue((int) ((((double)Kessel.HauptantriebsZeit)*Hauptantriebsfakter) / 1000)); // HASensorNumber int
-  // kessel_pelletsna.setValue((int) (((float)Kessel.AustragungsGesamtLaufzeit * Nebenantriebsfaktor))); // HASensorNumber int
+  // kessel_hauptantriebtakt.setValue(Kessel.Hauptantriebtakt / 1000.0); // HASensorNumber %2.1f
+  // kessel_pellets.setValue((int) (((Kessel.HauptantriebsZeit)*Hauptantriebsfakter) / 1000)); // HASensorNumber int
+  // kessel_pelletsna.setValue((int) ((Kessel.AustragungsGesamtLaufzeit * Nebenantriebsfaktor))); // HASensorNumber int
 
   framecounter = 0;
   errorcounter = 0;
@@ -545,14 +545,14 @@ void otherStuff(unsigned long &currentMillis) {
     p = (int)(Hauptantriebsfakter * 60 * 60 * (Kessel.HauptantriebsZeit - ZD)) / (currentMillis - timerd);
     // kessel_deltapelletsh.setValue(p); // HASensorNumber int
 
-    Kessel.Leistung = LEISTUNGKESSEL * TAKT100 * ((double)(Kessel.HauptantriebsZeit - ZD)) / ((double)(currentMillis - timerd));
-    // kessel_leistung.setValue(float(Kessel.Leistung)); // HASensorNumber %2.1f
+    Kessel.Leistung = LEISTUNGKESSEL * TAKT100 * ((float)(Kessel.HauptantriebsZeit - ZD)) / (currentMillis - timerd);
+    // kessel_leistung.setValue(Kessel.Leistung); // HASensorNumber %2.1f
 
     // if (Kessel.Leistung < 1.0 )
     //   kessel_deltapelletsh.setValue(0); // HASensorNumber int
 
     // Verbrauch pro Stunde gemessen über NA
-    // kessel_deltapelletnsh.setValue((int) ((float)(Kessel.AustragungsGesamtLaufzeit - AustragungsGesamtLaufzeit) * Nebenantriebsfaktor * 1000.0 * 3600.0 / ( currentMillis - timerd))); // HASensorNumber int
+    // kessel_deltapelletnsh.setValue((int) (Kessel.AustragungsGesamtLaufzeit - AustragungsGesamtLaufzeit) * Nebenantriebsfaktor * 1000 * 3600.0 / ( currentMillis - timerd))); // HASensorNumber int
 
     AustragungsGesamtLaufzeit = Kessel.AustragungsGesamtLaufzeit;
     Umdrehungen = Kessel.HauptantriebUmdrehungen;
@@ -566,11 +566,11 @@ void otherStuff(unsigned long &currentMillis) {
   // Alle xx Min  berechnen (-> ca. 1.9 wenn der sinkt gibt es Förderprobleme)
   if (currentMillis > (HANAtimer + 30 * 60 * 1000)) {
     HANAtimer = currentMillis;
-    double v;
+    float v;
 
     if ((Kessel.HauptantriebsZeit - HauptantriebsZeit) && (Kessel.AustragungsGesamtLaufzeit - NebenantriebsZeit)) {  // Wenn der Hauptantrieb lief
-      v = (float)(Kessel.HauptantriebsZeit - HauptantriebsZeit) / ((float)(Kessel.AustragungsGesamtLaufzeit - NebenantriebsZeit) * 1000.0);
-      // kessel_hana.setValue(float(v)); // HASensorNumber %f
+      v = (Kessel.HauptantriebsZeit - HauptantriebsZeit) / ((Kessel.AustragungsGesamtLaufzeit - NebenantriebsZeit) * 1000.0);
+      // kessel_hana.setValue(v); // HASensorNumber %f
       NebenantriebsZeit = Kessel.AustragungsGesamtLaufzeit;
       HauptantriebsZeit = Kessel.HauptantriebsZeit;
     }

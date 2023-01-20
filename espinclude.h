@@ -50,7 +50,7 @@ int getBit(unsigned char *data, int offset, int numberOfBit) {
 // length = read x bytes
 // fFactor = used to multiply the read result
 // isSigned = is it a signed or unsigned number?
-double getValue(unsigned char *data, int offset, int length, double fFactor, bool isSigned) {
+float getValue(unsigned char *data, int offset, int length, float fFactor, bool isSigned) {
   int value = 0;
   for (int i = 0; i < length; i++) {
     value += data[offset + i] << ((length - i - 1) * 8);
