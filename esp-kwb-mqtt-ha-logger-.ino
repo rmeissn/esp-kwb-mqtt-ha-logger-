@@ -17,6 +17,7 @@
 
 #define LEISTUNGKESSEL 22.0   // KW at 100%
 #define TAKT100 (12.5 / 5.0)  // Taktung bei 100% Leistung 5s Laufzeit auf 12.5 sek
+#define RLAGESAMTLAUFZEIT 110 // in seconds, look up in boiler menu
 
 int updateEveryMinutes = 1;
 // #define PUBLISHUNKNOWN true; // publish control and sense bytes to kwb/ to find specific states while using relay test
@@ -61,6 +62,8 @@ float Hauptantriebsfakter = (400 / 128.0);  // 400g in 120sek. > 3.333 g/s
 unsigned long timerd = 0, lastUpdateCycleMillis = 0;
 unsigned long austragungStartedAtMillis = 0;
 unsigned long millisAtLastRun = 0; // millis since last loop run
+unsigned long millisRLAOpened = 0; // millis the RLA was opened from fully closed
+unsigned long millisRLAStartedToMove = 0;
 unsigned long wifiPreviousTime = 0;
 int wifiReconnectDelay = 5; //mins
 
@@ -139,6 +142,7 @@ HASensorNumber kessel_saugzug("kwb_kessel_saugzug", HASensorNumber::PrecisionP0)
 HASensorNumber kessel_energie("kwb_kessel_energie", HASensorNumber::PrecisionP3);
 HASensorNumber kessel_brennerstunden("kwb_kessel_brennerstunden", HASensorNumber::PrecisionP3);
 HASensorNumber kessel_unterdruck("kwb_kessel_unterdruck", HASensorNumber::PrecisionP1);
+HASensorNumber kessel_rlageoeffnet("kwb_kessel_rlageoeffnet", HASensorNumber::PrecisionP0);
 
 void wifiReconnectIfLost(unsigned long &currentTime) {
   if ((WiFi.status() != WL_CONNECTED) && (currentTime - wifiPreviousTime >= wifiReconnectDelay * 60 * 10)) {
@@ -214,6 +218,7 @@ void setup() {
   configureSensor(kessel_energie, "Kessel Energie", "mdi:counter", "kWh", "temperature");
   configureSensor(kessel_brennerstunden, "Kessel Brennerstunden", "mdi:clock-outline", "h" , "duration");
   configureSensor(kessel_unterdruck, "Kessel Unterdruck", "mdi:gauge", "mbar", "pressure");
+  configureSensor(kessel_rlageoeffnet, "Kessel RLA geöffnet", "mdi:valve", "%", "");
 
   configureSensor(kessel_reinigung, "Kessel Reinigung", "mdi:hand-wash-outline");
   configureSensor(kessel_rauchsauger, "Kessel Rauchsauger", "mdi:smoke");
@@ -319,12 +324,16 @@ void readCTRLMSGFrame(unsigned char* data, unsigned long &currentMillis, int dat
     Kessel.HK1_Heizkreismischer = 1;
   else                                                     // 0 & 0 = off
     Kessel.HK1_Heizkreismischer = 0;
-  if (getBit(data, 2, 3) && getBit(data, 2, 4))            // 1 & 1 = open
+
+  if (getBit(data, 2, 3) && getBit(data, 2, 4) && oKessel.RLAVentil != 1) {              // 1 & 1 = open
     Kessel.RLAVentil = 1;
-  else if (getBit(data, 2, 3) && getBit(data, 2, 4) == 0)  // 1 & 0 = close
+    millisRLAStartedToMove = currentMillis;
+  } else if (getBit(data, 2, 3) && getBit(data, 2, 4) == 0 && oKessel.RLAVentil != -1) { // 1 & 0 = close
     Kessel.RLAVentil = -1;
-  else                                                     // 0 & 0 = off
+    millisRLAStartedToMove = currentMillis;
+  } else if (getBit(data, 2, 3) == 0 && getBit(data, 2, 4) == 0) {                       // 0 & 0 = off
     Kessel.RLAVentil = 0;
+  }
   Kessel.Boilerpumpe = getBit(data, 2, 5);
   Kessel.Stoerung1 = 1 - getBit(data, 3, 0);
   Kessel.Drehrost = getBit(data, 3, 6);
@@ -341,6 +350,18 @@ void readCTRLMSGFrame(unsigned char* data, unsigned long &currentMillis, int dat
   Kessel.Hauptantriebtakt = getValue(data, 10, 2, 10, false);
   Kessel.Hauptantrieb = getValue(data, 12, 2, 10, false);
   Kessel.Zuendung = getBit(data, 16, 2);
+
+  // calc RLA moving time
+  if(Kessel.RLAVentil == 0 && oKessel.RLAVentil != 0) { // jumped to off
+    unsigned long RLARuntime = currentMillis - millisRLAStartedToMove; // in MilliSeconds, TODO what if currentMillis overflow?
+    if(oKessel.RLAVentil == 1) // opened
+      millisRLAOpened += RLARuntime;
+    else if(oKessel.RLAVentil == -1) //closed
+      millisRLAOpened -= RLARuntime;
+    if(millisRLAOpened > RLAGESAMTLAUFZEIT * 1000) // no check for <0 as it is an unsigned long
+      millisRLAOpened = RLAGESAMTLAUFZEIT * 1000;
+  }
+  oKessel.RLAVentil = Kessel.RLAVentil;
 
   // TODO review the below code
   // Hauptantrieb Range:  0 .. Kessel.Hauptantriebtakt
@@ -456,7 +477,6 @@ void publishFastChangingValues() {
 
   publishValueToMQTTOnChange(Kessel.HK1_Heizkreismischer, oKessel.HK1_Heizkreismischer, "kwb/Heizkreismischer");
   publishValueToMQTTOnChange(Kessel.DrehungSaugschlauch, oKessel.DrehungSaugschlauch, "kwb/DrehungSaugschlauch");
-  publishValueToMQTTOnChange(Kessel.RLAVentil, oKessel.RLAVentil, "kwb/RLAVentil");
 
   publishValueToHAOnChange(Kessel.Boilerpumpe, oKessel.Boilerpumpe, kessel_boilerpumpe);
   publishValueToHAOnChange(Kessel.Heizkreispumpe, oKessel.Heizkreispumpe, kessel_heizkreispumpe);
@@ -478,6 +498,7 @@ void publishBoilerStateToHA (unsigned long &currentMillis) {
     if(currentMillis <= 2 * 60 *1000 && (Kessel.Photodiode >= 50 && Kessel.Rauchgastemperatur >= 70)) { // device just started - might be burning
       kessel.setValue("Brennt");
       Kessel.Kesselstatus = 2;
+      millisRLAOpened = RLAGESAMTLAUFZEIT * 1000; // is probably fully opened if boiler is currently burning, faster dail in of the RLA percentage
     } else if (Kessel.Geblaese > 300){
       kessel.setValue("Neustart");
       Kessel.Kesselstatus = 1;
@@ -518,6 +539,9 @@ void publishSlowlyChangingValues(unsigned long &currentMillis) {
   // kessel_anforderung.setState((((int)(Kessel.ext)) == 0) ? false : true); // Anfordung not on ext for my boiler
 
   publishBoilerStateToHA(currentMillis);
+
+  // (millisRLAOpened / (RLAGESAMTLAUFZEIT * 1000.0)) * 100
+  kessel_rlageoeffnet.setValue((int) (millisRLAOpened / (RLAGESAMTLAUFZEIT * 10))); // will be wrong until a full open-close cycle passed
 }
 
 // TODO review the code of this function
