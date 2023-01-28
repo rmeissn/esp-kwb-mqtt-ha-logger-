@@ -34,9 +34,8 @@ int updateEveryMinutes = 1;
 
 // Globals ********************************************************************
 #define MSGMAXLENGTH 256 // in byte
-int HauptantriebsImpuls = 0;
-long Umdrehungen = 0, ZD = 0, AustragungsGesamtLaufzeit = 0;
-long NebenantriebsZeit = 0, HauptantriebsZeit = 0, HANAtimer = 0;  // HANAtimer = Timer zur Ausgabe der Hauptantrieb/Nebenantrieb Ratio
+int HauptantriebImpuls = 0; // 0/1 (Bit)
+unsigned long HauptantriebsZeitAtLastConsumptionCalculation = 0, AustragungsGesamtLaufzeitAtLastConsumptionCalculation = 0;
 
 extern long bytecounter;
 extern long framecounter;
@@ -59,7 +58,7 @@ extern long errorcounter;
 float Nebenantriebsfaktor = 5.4;
 float Hauptantriebsfakter = (400 / 128.0);  // 400g in 120sek. > 3.333 g/s
 
-unsigned long timerd = 0, lastUpdateCycleMillis = 0;
+unsigned long timeAtLastConsumptionCalculation = 0, lastUpdateCycleMillis = 0;
 unsigned long austragungStartedAtMillis = 0;
 unsigned long millisAtLastRun = 0; // millis since last loop run
 unsigned long millisAtBoilerRestart = 0; // millis since boiler restarted
@@ -90,12 +89,12 @@ struct ef2 {
   int Zuendung = 0;
   int Drehrost = 0;
   int Rauchsauger = 0;
-  int AustragungsGesamtLaufzeit = 0;
+  unsigned long AustragungsGesamtLaufzeit = 0; // in seconds
   int Stoerung1 = 0;
   int Raumaustragung = 0;
-  int Hauptantriebimpuls = 0;           // Impulszähler
+  int Hauptantriebimpuls = 0;           // Impulszähler, 0 or 1 (Bit)
   int Hauptantrieb = 0;                 // Hauptantrieb Motorlaufzeit in Millisekunden
-  int HauptantriebUmdrehungen = 0;      // Umdrehungen Stoker
+  unsigned long HauptantriebUmdrehungen = 0; // Umdrehungen Stoker - Stoker = Hauptantrieb?
   int DrehungSaugschlauch = 0;          // -1 left, 0 off, 1 right
   int Boilerpumpe = 0;
   int Heizkreispumpe = 0;
@@ -238,7 +237,7 @@ void setup() {
 
   mqtt.begin(MQTTSERVER, MQTTUSER, MQTTPASSWORD);
 
-  lastUpdateCycleMillis = timerd = millis();
+  lastUpdateCycleMillis = timeAtLastConsumptionCalculation = millis();
 }
 
 // String lowerPrecision(float in){
@@ -443,14 +442,23 @@ void readSenseMSGFrame(unsigned char* data, unsigned long &currentMillis, int da
 
   // TODO review the below code
   // zwei gleiche impulse, die vom akt. unterschiedlich sind
-  if ((Kessel.Hauptantriebimpuls == oKessel.Hauptantriebimpuls) && (Kessel.Hauptantriebimpuls != HauptantriebsImpuls)) {
-    // Hauptantrieb läuft und produziert Impulse
-    HauptantriebsImpuls = Kessel.Hauptantriebimpuls;
-    Kessel.HauptantriebUmdrehungen++;  // vollst. Takte zählen
-    oKessel.Hauptantriebimpuls = Kessel.Hauptantriebimpuls;
-  }  // Impulsende
+  // Hauptantriebimpuls is a Bit (0/1)
+  // 00 && 00 - no, 10 - no, 11 && 10 - yes, 11 && 11 - no, 01 - no, 00 && 01 - yes
+  // counts if Hauptantriebimpuls changed it's state for at least two readSenseMSGFrame calls - so longer than xx ms
+  // if ((Kessel.Hauptantriebimpuls == oKessel.Hauptantriebimpuls) && (Kessel.Hauptantriebimpuls != HauptantriebImpuls)) {
+  //   // Hauptantrieb läuft und produziert Impulse
+  //   HauptantriebImpuls = Kessel.Hauptantriebimpuls;
+  //   Kessel.HauptantriebUmdrehungen++;  // vollst. Takte zählen
+  //   oKessel.Hauptantriebimpuls = Kessel.Hauptantriebimpuls;
+  // } // Impulsende
+  //
+  // oKessel.Hauptantriebimpuls = Kessel.Hauptantriebimpuls;
 
-  oKessel.Hauptantriebimpuls = Kessel.Hauptantriebimpuls;
+  //simplified version of the above - correct?
+  if (Kessel.Hauptantriebimpuls != oKessel.Hauptantriebimpuls) { // Hauptantrieb läuft
+    Kessel.HauptantriebUmdrehungen++;  // Impulse zählen
+    oKessel.Hauptantriebimpuls = Kessel.Hauptantriebimpuls;
+  }
 }
 
 // Some values change quite fast, which is why they are published immedeately
@@ -546,6 +554,8 @@ void publishSlowlyChangingValues(unsigned long &currentMillis) {
   kessel_rlageoeffnet.setValue((int) (millisRLAOpened / (RLAGESAMTLAUFZEIT * 10))); // will be wrong until a full open-close cycle passed
 }
 
+unsigned long NebenantriebsZeitAtLastHANACalculation = 0, HauptantriebsZeitAtLastHANACalculation = 0, MillisAtLastHANACalculation = 0;
+
 // TODO review the code of this function
 // currentMillis =  current milliseconds the MCU is on
 void otherStuff(unsigned long &currentMillis) {
@@ -562,44 +572,47 @@ void otherStuff(unsigned long &currentMillis) {
   // debugLog(framecounter, "%d", "kwb/frames");
   // debugLog(errorcounter, "%d", "kwb/errors");
 
-  // akt Verbrauch berechnen
-  if (Kessel.HauptantriebUmdrehungen - Umdrehungen) {
+  if (Kessel.HauptantriebUmdrehungen != oKessel.HauptantriebUmdrehungen) { // calculate current consumption
     int d, p;
+    unsigned long timeSinceLastConsumptionCalculation = currentMillis - timeAtLastConsumptionCalculation; // in ms
+    unsigned long HauptantriebsZeitDiff = Kessel.HauptantriebsZeit - HauptantriebsZeitAtLastConsumptionCalculation; // in ms
 
-    d = (Kessel.HauptantriebUmdrehungen - Umdrehungen) * 3600 * 1000 / (currentMillis - timerd);
-    // Besp   3.58 * 60 * 60    1000ms / 5000ms
-    p = (int)(Hauptantriebsfakter * 60 * 60 * (Kessel.HauptantriebsZeit - ZD)) / (currentMillis - timerd);
+    // what is d?
+    d = (Kessel.HauptantriebUmdrehungen - oKessel.HauptantriebUmdrehungen) * 3600 * 1000 / timeSinceLastConsumptionCalculation;
+
+    // what is p?
+    // Example: 3.58 * 60 * 60 * 1000ms / 5000ms
+    p = (int)(Hauptantriebsfakter * 60 * 60 * HauptantriebsZeitDiff) / timeSinceLastConsumptionCalculation;
     // kessel_deltapelletsh.setValue(p); // HASensorNumber int
 
-    Kessel.Leistung = LEISTUNGKESSEL * TAKT100 * ((float)(Kessel.HauptantriebsZeit - ZD)) / (currentMillis - timerd);
+    Kessel.Leistung = LEISTUNGKESSEL * TAKT100 * ((float) HauptantriebsZeitDiff) / timeSinceLastConsumptionCalculation;
     // kessel_leistung.setValue(Kessel.Leistung); // HASensorNumber %2.1f
 
     // if (Kessel.Leistung < 1.0 )
     //   kessel_deltapelletsh.setValue(0); // HASensorNumber int
 
     // Verbrauch pro Stunde gemessen über NA
-    // kessel_deltapelletnsh.setValue((int) (Kessel.AustragungsGesamtLaufzeit - AustragungsGesamtLaufzeit) * Nebenantriebsfaktor * 1000 * 3600.0 / ( currentMillis - timerd))); // HASensorNumber int
+    // kessel_deltapelletnsh.setValue((int) (Kessel.AustragungsGesamtLaufzeit - AustragungsGesamtLaufzeitAtLastConsumptionCalculation) * Nebenantriebsfaktor * 1000 * 3600.0 / ( currentMillis - timeAtLastConsumptionCalculation))); // HASensorNumber int
 
-    AustragungsGesamtLaufzeit = Kessel.AustragungsGesamtLaufzeit;
-    Umdrehungen = Kessel.HauptantriebUmdrehungen;
-    // kessel_deltat.setValue((millis() - timerd) / 1000); // HASensorNumber int
-    ZD = Kessel.HauptantriebsZeit;
-    timerd = currentMillis;
+    AustragungsGesamtLaufzeitAtLastConsumptionCalculation = Kessel.AustragungsGesamtLaufzeit;
+    // kessel_deltat.setValue(timeSinceLastConsumptionCalculation / 1000); // HASensorNumber int, seconds
+    HauptantriebsZeitAtLastConsumptionCalculation = Kessel.HauptantriebsZeit;
+    timeAtLastConsumptionCalculation = currentMillis;
   }
 
-  //////////////////////////////////////////////
-  // Berechnung HA/NA Verhältnis
-  // Alle xx Min  berechnen (-> ca. 1.9 wenn der sinkt gibt es Förderprobleme)
-  if (currentMillis > (HANAtimer + 30 * 60 * 1000)) {
-    HANAtimer = currentMillis;
-    float v;
+  // Calculation of Hauptantrieb/Nebenantrieb ratio
+  if (currentMillis > (MillisAtLastHANACalculation + 30 * 60 * 1000)) { // run every 30 mins
+    unsigned long HauptantriebsZeitDiff = Kessel.HauptantriebsZeit - HauptantriebsZeitAtLastHANACalculation;
+    unsigned long NebenantriebsZeitDiff = Kessel.AustragungsGesamtLaufzeit - NebenantriebsZeitAtLastHANACalculation;
 
-    if ((Kessel.HauptantriebsZeit - HauptantriebsZeit) && (Kessel.AustragungsGesamtLaufzeit - NebenantriebsZeit)) {  // Wenn der Hauptantrieb lief
-      v = (Kessel.HauptantriebsZeit - HauptantriebsZeit) / ((Kessel.AustragungsGesamtLaufzeit - NebenantriebsZeit) * 1000.0);
-      // kessel_hana.setValue(v); // HASensorNumber %f
-      NebenantriebsZeit = Kessel.AustragungsGesamtLaufzeit;
-      HauptantriebsZeit = Kessel.HauptantriebsZeit;
+    if ( HauptantriebsZeitDiff > 0 && NebenantriebsZeitDiff > 0) { // if Hauptantrieb was running
+      // kessel_hana = ~1.9. If the actual value is lower, there are extraction/delivery problems
+      // kessel_hana.setValue(HauptantriebsZeitDiff / (NebenantriebsZeitDiff * 1000.0)); // HASensorNumber %f
+      NebenantriebsZeitAtLastHANACalculation = Kessel.AustragungsGesamtLaufzeit;
+      HauptantriebsZeitAtLastHANACalculation = Kessel.HauptantriebsZeit;
     }
+
+    MillisAtLastHANACalculation = currentMillis;
   }
 
   oKessel.AustragungsGesamtLaufzeit = Kessel.AustragungsGesamtLaufzeit;
