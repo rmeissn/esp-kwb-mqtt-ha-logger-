@@ -62,6 +62,7 @@ float Hauptantriebsfakter = (400 / 128.0);  // 400g in 120sek. > 3.333 g/s
 unsigned long timerd = 0, lastUpdateCycleMillis = 0;
 unsigned long austragungStartedAtMillis = 0;
 unsigned long millisAtLastRun = 0; // millis since last loop run
+unsigned long millisAtBoilerRestart = 0; // millis since boiler restarted
 unsigned long millisRLAOpened = 0; // millis the RLA was opened from fully closed
 unsigned long millisRLAStartedToMove = 0;
 unsigned long wifiPreviousTime = 0;
@@ -493,25 +494,26 @@ void publishFastChangingValues() {
 }
 
 void publishBoilerStateToHA (unsigned long &currentMillis) {
-  int oldStat = oKessel.Kesselstatus;
-  if (oldStat == 0) { // Off
-    if(currentMillis <= 2 * 60 *1000 && (Kessel.Photodiode >= 50 && Kessel.Rauchgastemperatur >= 70)) { // device just started - might be burning
+  int boilerOnMins = (currentMillis - millisAtBoilerRestart) / (1000 * 60); // minutes since boiler started to run
+  if(boilerOnMins < 0) millisAtBoilerRestart = 0; // respect overflow of currentMillis
+  if (oKessel.Kesselstatus == 0) { // Off
+    if(currentMillis <= 2 * 60 *1000 && (Kessel.Photodiode >= 50 && Kessel.Rauchgastemperatur >= 85)) { // device just started - might be burning (within first 2 minutes after device start)
       kessel.setValue("Brennt");
       Kessel.Kesselstatus = 2;
       millisRLAOpened = RLAGESAMTLAUFZEIT * 1000; // is probably fully opened if boiler is currently burning, faster dail in of the RLA percentage
     } else if (Kessel.Geblaese > 300){
       kessel.setValue("Neustart");
       Kessel.Kesselstatus = 1;
+      millisAtBoilerRestart = currentMillis;
     }
-  } else if (oldStat == 1 && Kessel.Rauchgastemperatur > 75) { // Restarted & starts to burn
+  } else if (oKessel.Kesselstatus == 1 && Kessel.Rauchgastemperatur > 85 && Kessel.Geblaese < 2350) { // Restarted & starts to burn
     kessel.setValue("Brennt");
     Kessel.Kesselstatus = 2;
+  // NOTE switches too early to afterrun, thus added boilerOnMins to prevent switching just after it started burning, still buggy
+  } else if (oKessel.Kesselstatus == 2 && Kessel.Photodiode < 50 && Kessel.Geblaese > 2300 && boilerOnMins > 20) { // Burned & expires
+    kessel.setValue("Nachlauf");
+    Kessel.Kesselstatus = 3;
   }
-    // switches too often to afterrun, Photodiode < 50 is already good, but geblase not - needs more/better conditions
-  // } else if (oldStat == 2 && Kessel.Photodiode < 50 && Kessel.Geblaese > 2200) { // Burned & expires
-  //   kessel.setValue("Nachlauf");
-  //   Kessel.Kesselstatus = 3;
-  // }
   if (Kessel.Photodiode < 20 && Kessel.Geblaese < 300) { // turn off and emergency escape
     kessel.setValue("Aus");
     Kessel.Kesselstatus = 0;
