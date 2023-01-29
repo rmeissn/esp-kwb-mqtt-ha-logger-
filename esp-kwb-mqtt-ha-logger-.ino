@@ -547,7 +547,7 @@ void publishSlowlyChangingValues(unsigned long &currentMillis) {
   // Approximation by straight line with characteristic points 30-800, 65-1650, 100-2250 (Power - RPM Fan)
   if(Kessel.Geblaese > 2250)
     kessel_leistung.setValue(100);
-  if(Kessel.Geblaese <= 2250 && Kessel.Geblaese >= 750)
+  else if(Kessel.Geblaese <= 2250 && Kessel.Geblaese >= 750)
     kessel_leistung.setValue((int) (0.0478 * Kessel.Geblaese - 9.89));
   else
     kessel_leistung.setValue(0);
