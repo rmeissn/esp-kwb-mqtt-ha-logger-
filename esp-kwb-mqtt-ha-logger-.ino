@@ -144,6 +144,7 @@ HASensorNumber kessel_energie("kwb_kessel_energie", HASensorNumber::PrecisionP3)
 HASensorNumber kessel_brennerstunden("kwb_kessel_brennerstunden", HASensorNumber::PrecisionP3);
 HASensorNumber kessel_unterdruck("kwb_kessel_unterdruck", HASensorNumber::PrecisionP1);
 HASensorNumber kessel_rlageoeffnet("kwb_kessel_rlageoeffnet", HASensorNumber::PrecisionP0);
+HASensorNumber kessel_leistung("kwb_kessel_leistung", HASensorNumber::PrecisionP0);
 
 void wifiReconnectIfLost(unsigned long &currentTime) {
   if ((WiFi.status() != WL_CONNECTED) && (currentTime - wifiPreviousTime >= wifiReconnectDelay * 60 * 10)) {
@@ -235,6 +236,7 @@ void setup() {
   configureSensor(kessel_photodiode, "Kessel Photodiode", "mdi:lightbulb", "%", "");
   configureSensor(kessel_geblaese, "Kessel Gebläse", "mdi:fan", "rpm", "");
   configureSensor(kessel_saugzug, "Kessel Saugzug", "mdi:fan", "rpm", "");
+  configureSensor(kessel_leistung, "Kessel Leistung", "mdi:flash", "%", "");
 
   mqtt.begin(MQTTSERVER, MQTTUSER, MQTTPASSWORD);
 
@@ -541,6 +543,14 @@ void publishSlowlyChangingValues(unsigned long &currentMillis) {
   // kessel_anforderung.setState((((int)(Kessel.ext)) == 0) ? false : true); // Anfordung not on ext for my boiler
 
   publishBoilerStateToHA(currentMillis);
+
+  // Approximation by straight line with characteristic points 30-800, 65-1650, 100-2250 (Power - RPM Fan)
+  if(Kessel.Geblaese > 2250)
+    kessel_leistung.setValue(100);
+  if(Kessel.Geblaese <= 2250 && Kessel.Geblaese >= 750)
+    kessel_leistung.setValue((int) (0.0478 * Kessel.Geblaese - 9.89));
+  else
+    kessel_leistung.setValue(0);
 
   // (millisRLAOpened / (RLAGESAMTLAUFZEIT * 1000.0)) * 100
   kessel_rlageoeffnet.setValue((int) (millisRLAOpened / (RLAGESAMTLAUFZEIT * 10))); // will be wrong until a full open-close cycle passed
