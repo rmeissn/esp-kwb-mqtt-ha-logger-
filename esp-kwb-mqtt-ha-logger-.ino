@@ -19,7 +19,7 @@
 #define TAKT100 (12.5 / 5.0)  // Taktung bei 100% Leistung 5s Laufzeit auf 12.5 sek
 #define RLAGESAMTLAUFZEIT 110 // in seconds, look up in boiler menu
 
-int updateEveryMinutes = 1;
+int updateEverySeconds = 30;
 // #define PUBLISHUNKNOWN true; // publish control and sense bytes to kwb/ to find specific states while using relay test
 // End of individual values
 
@@ -105,7 +105,7 @@ struct ef2 {
   int Kesselpumpe = 0;                  // in %
   int RLAVentil = 0;                    // -1 close, 0 off, 1 open
   int ext = 0;
-  int Kesselstatus = 0;                 // 0 = Off, 1 = ignition, 2 = operation 3 = afterrun
+  int Kesselstatus = -1;                // -1 = uninitialized, 0 = Off, 1 = ignition, 2 = operation, 3 = afterrun
   int HK1_Heizkreismischer = 0;             // -1 close, 0 off, 1 open
   unsigned long HauptantriebsZeit = 1;  // Gesamt Hauptantriebszeit in Millisekunden
   unsigned long Hauptantriebtakt = 1;   // Taktzeit in Millisekunden
@@ -114,6 +114,22 @@ struct ef2 {
 };
 
 struct ef2 Kessel, oKessel; // current and last boiler state
+
+struct FastPublishedState {
+  int boilerpumpe = -1;
+  int heizkreispumpe = -1;
+  int rauchsauger = -1;
+  int drehrost = -1;
+  int raumaustragung = -1;
+  int reinigung = -1;
+  int zuendung = -1;
+  int stoerung = -1;
+  int kesselpumpe = -1;
+  int photodiode = -1;
+  int heizkreismischer = -99;
+  int drehungSaugschlauch = -99;
+};
+FastPublishedState lastPublished;
 
 #include "espinclude.h"
 
@@ -260,11 +276,17 @@ void setup() {
 //   return String(tmp);
 // }
 
-bool tempdiff(float &a, float &b, float &diff) {
-  return (abs(a - b) >= diff);
+bool tempdiff(float a, float b, float diff) {
+  return (fabsf(a - b) >= diff);
 }
 
 void debugLog(int value, const char* formatter, const char* topic) {
+  char msg[64];
+  snprintf(msg, sizeof(msg), formatter, value);
+  mqtt.publish(topic, msg);
+}
+
+void debugLog(long value, const char* formatter, const char* topic) {
   char msg[64];
   snprintf(msg, sizeof(msg), formatter, value);
   mqtt.publish(topic, msg);
@@ -289,7 +311,7 @@ void publishValueToMQTTOnChange(int &current, int &old, const char* topic) {
   }
 }
 
-void publishValueToHAOnChange(int &current, int &old, HABinarySensor &target) {
+void publishValueToHAOnChange(int current, int &old, HABinarySensor &target) {
   if (current != old) {
     target.setState(current);
     old = current;
@@ -303,6 +325,8 @@ void publishValueToHAOnChange(int &current, int &old, HABinarySensor &target) {
 // target = target, where to copy the resulting bit array (1 char per bit)
 // function from stackoverflow, tested to work correctly
 void recordMsgAsBinaryString(unsigned char* source, int lengthInBytes, char* target) {
+  if (lengthInBytes < 0) lengthInBytes = 0;
+  if (lengthInBytes > 32) lengthInBytes = 32; // matches char[32 * 8 + 33] buffer size
   int s = 0;
   for (int i = 0; i < lengthInBytes; i++) {
     unsigned char *b = (unsigned char*) &source[i];
@@ -318,6 +342,7 @@ void recordMsgAsBinaryString(unsigned char* source, int lengthInBytes, char* tar
     target[(i + 1) * 8 + s] = ' '; // add space after 8 bits
     s++;
   }
+  target[lengthInBytes * 8 + s] = '\0';
 }
 
 // extract data from the control message
@@ -366,14 +391,16 @@ void readCTRLMSGFrame(unsigned char* data, unsigned long &currentMillis, int dat
   Kessel.Zuendung = getBit(data, 16, 2);
 
   // calc RLA moving time
-  if(Kessel.RLAVentil == 0 && oKessel.RLAVentil != 0) { // jumped to off
-    unsigned long RLARuntime = currentMillis - millisRLAStartedToMove; // in MilliSeconds, TODO what if currentMillis overflow?
-    if(oKessel.RLAVentil == 1) // opened
-      millisRLAOpened += RLARuntime;
-    else if(oKessel.RLAVentil == -1) //closed
-      millisRLAOpened -= RLARuntime;
-    if(millisRLAOpened > RLAGESAMTLAUFZEIT * 1000) // no check for <0 as it is an unsigned long
-      millisRLAOpened = RLAGESAMTLAUFZEIT * 1000;
+  if (Kessel.RLAVentil == 0 && oKessel.RLAVentil != 0) { // jumped to off
+    unsigned long RLARuntime = currentMillis - millisRLAStartedToMove; // in MilliSeconds
+    unsigned long maxRLAMillis = (unsigned long)RLAGESAMTLAUFZEIT * 1000UL;
+    if (oKessel.RLAVentil == 1) { // opened
+      millisRLAOpened = (RLARuntime >= maxRLAMillis || millisRLAOpened > maxRLAMillis - RLARuntime)
+        ? maxRLAMillis
+        : (millisRLAOpened + RLARuntime);
+    } else if (oKessel.RLAVentil == -1) { // closed
+      millisRLAOpened = (RLARuntime >= millisRLAOpened) ? 0 : (millisRLAOpened - RLARuntime);
+    }
   }
   oKessel.RLAVentil = Kessel.RLAVentil;
 
@@ -401,6 +428,7 @@ void readCTRLMSGFrame(unsigned char* data, unsigned long &currentMillis, int dat
     } else {                          // Raumaustragung switched on
       austragungStartedAtMillis = currentMillis;
     }
+    oKessel.Raumaustragung = Kessel.Raumaustragung;
   }
 }
 
@@ -439,11 +467,11 @@ void readSenseMSGFrame(unsigned char* data, unsigned long &currentMillis, int da
   #ifdef PUBLISHUNKNOWN
     for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
       int s = i * 2 + 24;  // 24 to 30
-      if (i >= 4)
-        s = i * 2 + 28;  // 36 to 50
-      else if (i >= 12)  // unknown area between 52 to 68
+      if (i >= 12)       // unknown area between 52 to 68
         s = i * 2 + 49;  // 73 to 87
-      if(s + 1 <= dataLength) // s+1 because we read 2 bytes
+      else if (i >= 4)
+        s = i * 2 + 28;  // 36 to 50
+      if (s + 1 < dataLength) // s+1 because we read 2 bytes (indices s and s+1)
         Kessel.Temp[i] = getValue(data, s, 2, 0.1, true);
     }
   #endif
@@ -478,144 +506,142 @@ void publishFastChangingValues() {
       memcpy(&(oKessel.ctrlMsg), &(Kessel.ctrlMsg), sizeof(Kessel.ctrlMsg));
     }
 
-    for (int i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
-      if (tempdiff(Kessel.Temp[i], oKessel.Temp[i], 0.4)) {
-        String name = "kwb/temp" + i;
-        char buf[64];
-        name.toCharArray(buf, name.length());
-        debugLog(Kessel.Temp[i], "%d", buf);
+    for (size_t i = 0; i < (sizeof(Kessel.Temp) / sizeof(Kessel.Temp[0])); i++) {
+      if (tempdiff(Kessel.Temp[i], oKessel.Temp[i], 0.4f)) {
+        char buf[24];
+        snprintf(buf, sizeof(buf), "kwb/temp%u", (unsigned int)i);
+        debugLog(Kessel.Temp[i], "%.1f", buf);
         oKessel.Temp[i] = Kessel.Temp[i];
       }
     }
   #endif
 
-  publishValueToMQTTOnChange(Kessel.HK1_Heizkreismischer, oKessel.HK1_Heizkreismischer, "kwb/Heizkreismischer");
-  publishValueToMQTTOnChange(Kessel.DrehungSaugschlauch, oKessel.DrehungSaugschlauch, "kwb/DrehungSaugschlauch");
-  // publishValueToMQTTOnChange(Kessel.RLAVentil, oKessel.RLAVentil, "kwb/RLAVentil");
-
-  publishValueToHAOnChange(Kessel.Boilerpumpe, oKessel.Boilerpumpe, kessel_boilerpumpe);
-  publishValueToHAOnChange(Kessel.Heizkreispumpe, oKessel.Heizkreispumpe, kessel_heizkreispumpe);
-  publishValueToHAOnChange(Kessel.Rauchsauger, oKessel.Rauchsauger, kessel_rauchsauger);
-  publishValueToHAOnChange(Kessel.Drehrost, oKessel.Drehrost, kessel_drehrost);
-  publishValueToHAOnChange(Kessel.Raumaustragung, oKessel.Raumaustragung, kessel_raumaustragung);
-  publishValueToHAOnChange(Kessel.Reinigung, oKessel.Reinigung, kessel_reinigung);
-  publishValueToHAOnChange(Kessel.Zuendung, oKessel.Zuendung, kessel_zuendung);
-
-  if (abs(Kessel.Photodiode - oKessel.Photodiode) >= 5) {
-    kessel_photodiode.setValue((int)Kessel.Photodiode);
-    oKessel.Photodiode = Kessel.Photodiode;
-  }
-}
-
-void setBoilerState(int newState, const char* label) {
-  if (Kessel.Kesselstatus != newState) {
-    Kessel.Kesselstatus = newState;
-    kessel.setValue(label);
-  }
-}
-
-void publishBoilerStateToHA(unsigned long currentMillis) {
-  static bool bootSynced = false;
-  static uint8_t afterrunCycles = 0;
-  static uint8_t burnRecoveryCycles = 0;
-  static uint8_t offCycles = 0;
-
-  bool isShuttingOff = (Kessel.Rauchsauger == 0) && (Kessel.Zuendung == 0) &&
-                       (Kessel.Geblaese < 300) && (Kessel.Photodiode < 20);
-  bool isStarting = (Kessel.Zuendung == 1) || ((Kessel.Rauchsauger == 1) && (Kessel.Geblaese > 300));
-  bool isBurningSteady = (Kessel.Rauchsauger == 1) && (Kessel.Zuendung == 0) &&
-                         (Kessel.Rauchgastemperatur >= 85.0) &&
-                         ((Kessel.Photodiode >= 45) || ((Kessel.Geblaese >= 600) && (Kessel.Geblaese < 2250)));
-
-  if (!bootSynced) {
-    bootSynced = true;
-    if ((Kessel.Rauchsauger == 1) && (Kessel.Photodiode >= 45) && (Kessel.Rauchgastemperatur >= 85.0)) {
-      millisAtBoilerRestart = currentMillis;
-      millisRLAOpened = RLAGESAMTLAUFZEIT * 1000UL; // assume open if already burning on boot
-      setBoilerState(2, "Brennt");
-    } else if (isStarting) {
-      millisAtBoilerRestart = currentMillis;
-      setBoilerState(1, "Neustart");
-    } else {
-      Kessel.Kesselstatus = 0;
-      kessel.setValue("Aus");
-    }
+  if (!mqtt.isConnected()) {
+    lastPublished = FastPublishedState();
     return;
   }
 
-  if (isShuttingOff) {
-    if (offCycles < 255) offCycles++;
+  publishValueToMQTTOnChange(Kessel.HK1_Heizkreismischer, lastPublished.heizkreismischer, "kwb/Heizkreismischer");
+  publishValueToMQTTOnChange(Kessel.DrehungSaugschlauch, lastPublished.drehungSaugschlauch, "kwb/DrehungSaugschlauch");
+  // publishValueToMQTTOnChange(Kessel.RLAVentil, oKessel.RLAVentil, "kwb/RLAVentil");
+
+  publishValueToHAOnChange(Kessel.Boilerpumpe, lastPublished.boilerpumpe, kessel_boilerpumpe);
+  publishValueToHAOnChange(Kessel.Heizkreispumpe, lastPublished.heizkreispumpe, kessel_heizkreispumpe);
+  publishValueToHAOnChange(Kessel.Rauchsauger, lastPublished.rauchsauger, kessel_rauchsauger);
+  publishValueToHAOnChange(Kessel.Drehrost, lastPublished.drehrost, kessel_drehrost);
+  publishValueToHAOnChange(Kessel.Raumaustragung, lastPublished.raumaustragung, kessel_raumaustragung);
+  publishValueToHAOnChange(Kessel.Reinigung, lastPublished.reinigung, kessel_reinigung);
+  publishValueToHAOnChange(Kessel.Zuendung, lastPublished.zuendung, kessel_zuendung);
+  publishValueToHAOnChange(Kessel.Stoerung1, lastPublished.stoerung, kessel_stoerung);
+  publishValueToHAOnChange((Kessel.Kesselpumpe == 100) ? 1 : 0, lastPublished.kesselpumpe, kessel_pumpe);
+
+  int currentPhotodiode = (int)Kessel.Photodiode;
+  if ((lastPublished.photodiode < 0) || (abs(currentPhotodiode - lastPublished.photodiode) >= 5)) {
+    kessel_photodiode.setValue(currentPhotodiode);
+    lastPublished.photodiode = currentPhotodiode;
+  }
+}
+
+bool conditionHeld(bool cond, bool &active, unsigned long &sinceMillis, unsigned long currentMillis, unsigned long holdMs) {
+  if (!cond) {
+    active = false;
+    return false;
+  }
+  if (!active) {
+    active = true;
+    sinceMillis = currentMillis;
+    return false;
+  }
+  return (currentMillis - sinceMillis) >= holdMs;
+}
+
+void publishBoilerStateToHA(unsigned long currentMillis) {
+  static const char* const STATE_LABELS[] = {"Aus", "Neustart", "Brennt", "Nachlauf"};
+  const unsigned long OFF_HOLD_MS = 10000UL;      // 10 s: catches brief ~1 min stops without jitter
+  const unsigned long START_HOLD_MS = 5000UL;     // 5 s: confirm restart
+  const unsigned long BURN_HOLD_MS = 30000UL;     // 30 s: avoid premature Brennt on ignition spike
+  const unsigned long AFTERRUN_HOLD_MS = 45000UL; // 45 s: enter Nachlauf promptly
+  const unsigned long RECOVER_HOLD_MS = 30000UL;  // 30 s: return from Nachlauf to Brennt
+
+  static int lastPublishedState = -1;
+  static bool offActive = false, phaseActive = false;
+  static unsigned long offSince = 0, phaseSince = 0;
+  static float startMinFlueTemp = 0.0;
+
+  bool isOff = (Kessel.Rauchsauger == 0) && (Kessel.Zuendung == 0) &&
+               (Kessel.Geblaese < 300) && (Kessel.Saugzug < 300) && (Kessel.Photodiode < 20);
+  bool isStarting = (Kessel.Reinigung == 0) &&
+                    ((Kessel.Zuendung == 1) ||
+                     ((Kessel.Rauchsauger == 1) && ((Kessel.Geblaese > 300) || (Kessel.Saugzug > 300))));
+  // Neustart fan ~2583 rpm vs steady burn <= ~2317 rpm; fallback at >= 115 C avoids getting stuck on heavy full load
+  bool isBurningSteady = (Kessel.Rauchsauger == 1) && (Kessel.Photodiode >= 45) &&
+                         (((Kessel.Rauchgastemperatur >= 85.0) && (Kessel.Geblaese < 2450)) ||
+                          ((Kessel.Rauchgastemperatur >= 115.0) && (Kessel.Photodiode >= 60)));
+  // Nachlauf fan ~2497+ rpm while photodiode drops < 45%
+  bool isAfterrun = (Kessel.Rauchsauger == 1) && (Kessel.Reinigung == 0) &&
+                    (Kessel.Photodiode < 45) && (Kessel.Geblaese > 2380);
+
+  if (Kessel.Kesselstatus < 0) {
+    if (isBurningSteady) {
+      Kessel.Kesselstatus = 2;
+      millisAtBoilerRestart = currentMillis;
+      millisRLAOpened = RLAGESAMTLAUFZEIT * 1000UL;
+    } else if (isStarting) {
+      Kessel.Kesselstatus = 1;
+      millisAtBoilerRestart = currentMillis;
+      startMinFlueTemp = Kessel.Rauchgastemperatur;
+    } else {
+      Kessel.Kesselstatus = 0;
+    }
   } else {
-    offCycles = 0;
+    int nextState = Kessel.Kesselstatus;
+    if ((Kessel.Kesselstatus != 0) && conditionHeld(isOff, offActive, offSince, currentMillis, OFF_HOLD_MS)) {
+      nextState = 0;
+    } else {
+      unsigned long boilerOnMins = (currentMillis - millisAtBoilerRestart) / 60000UL;
+      switch (Kessel.Kesselstatus) {
+        case 0: // Aus
+          if (conditionHeld(isStarting, phaseActive, phaseSince, currentMillis, START_HOLD_MS))
+            nextState = 1;
+          break;
+        case 1: // Neustart: require flue temp to rise >= 5 C above restart minimum so cooling hot-restarts do not jump to Brennt
+          if (Kessel.Rauchgastemperatur < startMinFlueTemp)
+            startMinFlueTemp = Kessel.Rauchgastemperatur;
+          if (conditionHeld(isBurningSteady && (Kessel.Rauchgastemperatur >= (startMinFlueTemp + 5.0)),
+                            phaseActive, phaseSince, currentMillis, BURN_HOLD_MS))
+            nextState = 2;
+          break;
+        case 2: // Brennt
+          if (conditionHeld(isAfterrun && (boilerOnMins >= 8), phaseActive, phaseSince, currentMillis, AFTERRUN_HOLD_MS))
+            nextState = 3;
+          break;
+        case 3: // Nachlauf
+          if (conditionHeld(isBurningSteady && ((Kessel.Photodiode >= 55) || (Kessel.Geblaese <= 2250)),
+                            phaseActive, phaseSince, currentMillis, RECOVER_HOLD_MS))
+            nextState = 2;
+          break;
+        default:
+          nextState = 0;
+          break;
+      }
+    }
+
+    if (nextState != Kessel.Kesselstatus) {
+      Kessel.Kesselstatus = nextState;
+      offActive = false;
+      phaseActive = false;
+      if (nextState == 1) {
+        millisAtBoilerRestart = currentMillis;
+        startMinFlueTemp = Kessel.Rauchgastemperatur;
+      }
+    }
   }
 
-  unsigned long boilerOnMins = (currentMillis - millisAtBoilerRestart) / 60000UL;
-
-  switch (Kessel.Kesselstatus) {
-    case 0: // Aus
-      afterrunCycles = 0;
-      burnRecoveryCycles = 0;
-      if (isStarting) {
-        millisAtBoilerRestart = currentMillis;
-        offCycles = 0;
-        setBoilerState(1, "Neustart");
-      }
-      break;
-
-    case 1: // Neustart
-      afterrunCycles = 0;
-      burnRecoveryCycles = 0;
-      if (isBurningSteady) {
-        setBoilerState(2, "Brennt");
-      } else if (offCycles >= 2) {
-        setBoilerState(0, "Aus");
-      }
-      break;
-
-    case 2: // Brennt
-      burnRecoveryCycles = 0;
-      if ((Kessel.Rauchsauger == 1) && (Kessel.Zuendung == 0) && (Kessel.Reinigung == 0) &&
-          (Kessel.Photodiode < 40) && (Kessel.Geblaese > 2200) && (boilerOnMins >= 10)) {
-        if (afterrunCycles < 255) afterrunCycles++;
-      } else {
-        afterrunCycles = 0;
-      }
-
-      if (offCycles >= 2) {
-        afterrunCycles = 0;
-        setBoilerState(0, "Aus");
-      } else if (afterrunCycles >= 2) {
-        afterrunCycles = 0;
-        setBoilerState(3, "Nachlauf");
-      }
-      break;
-
-    case 3: // Nachlauf
-      afterrunCycles = 0;
-      if (Kessel.Zuendung == 1) {
-        burnRecoveryCycles = 0;
-        millisAtBoilerRestart = currentMillis;
-        setBoilerState(1, "Neustart");
-      } else if (isBurningSteady && ((Kessel.Photodiode >= 50) || (Kessel.Geblaese <= 2150))) {
-        if (burnRecoveryCycles < 255) burnRecoveryCycles++;
-        if (burnRecoveryCycles >= 2) {
-          burnRecoveryCycles = 0;
-          setBoilerState(2, "Brennt");
-        }
-      } else {
-        burnRecoveryCycles = 0;
-      }
-
-      if (offCycles >= 2) {
-        burnRecoveryCycles = 0;
-        setBoilerState(0, "Aus");
-      }
-      break;
-
-    default:
-      Kessel.Kesselstatus = 0;
-      kessel.setValue("Aus");
-      break;
+  if (!mqtt.isConnected()) {
+    lastPublishedState = -1;
+  } else if (lastPublishedState != Kessel.Kesselstatus) {
+    kessel.setValue(STATE_LABELS[Kessel.Kesselstatus]);
+    lastPublishedState = Kessel.Kesselstatus;
   }
 }
 
@@ -630,16 +656,12 @@ void publishSlowlyChangingValues(unsigned long &currentMillis) {
   kessel_ruecklauf.setValue(Kessel.Ruecklauftemperatur);
   kessel_temperatur.setValue(Kessel.Kesseltemperatur);
   kessel_rauchgas.setValue(Kessel.Rauchgastemperatur);
-  kessel_pumpe.setState(Kessel.Kesselpumpe == 100);
   kessel_geblaese.setValue(Kessel.Geblaese);
   kessel_saugzug.setValue(Kessel.Saugzug);
   kessel_energie.setValue(Kessel.kwh);
-  kessel_stoerung.setState(Kessel.Stoerung1);
   kessel_brennerstunden.setValue(Kessel.Brennerstunden);
   kessel_unterdruck.setValue(Kessel.Unterdruck);
   // kessel_anforderung.setState((((int)(Kessel.ext)) == 0) ? false : true); // Anfordung not on ext for my boiler
-
-  publishBoilerStateToHA(currentMillis);
 
   // Approximation by straight line with characteristic points 30-800, 65-1650, 100-2250 (Power - RPM Fan)
   if(Kessel.Geblaese > 2250)
@@ -669,33 +691,34 @@ void otherStuff(unsigned long &currentMillis) {
   // kessel_pellets.setValue((int) (((Kessel.HauptantriebsZeit)*Hauptantriebsfakter) / 1000)); // HASensorNumber int
   // kessel_pelletsna.setValue((int) ((Kessel.AustragungsGesamtLaufzeit * Nebenantriebsfaktor))); // HASensorNumber int
 
+  // debugLog(framecounter, "%ld", "kwb/frames");
+  // debugLog(errorcounter, "%ld", "kwb/errors");
+
   framecounter = 0;
   errorcounter = 0;
 
-  // debugLog(framecounter, "%d", "kwb/frames");
-  // debugLog(errorcounter, "%d", "kwb/errors");
-
   // akt Verbrauch berechnen
-  if (Kessel.HauptantriebUmdrehungen - Umdrehungen) {
+  unsigned long deltaMs = currentMillis - timerd;
+  if ((Kessel.HauptantriebUmdrehungen != Umdrehungen) && (deltaMs > 0)) {
     int d, p;
 
-    d = (Kessel.HauptantriebUmdrehungen - Umdrehungen) * 3600 * 1000 / (currentMillis - timerd);
+    d = (int)(((long long)(Kessel.HauptantriebUmdrehungen - Umdrehungen) * 3600000LL) / (long long)deltaMs);
     // Besp   3.58 * 60 * 60    1000ms / 5000ms
-    p = (int)(Hauptantriebsfakter * 60 * 60 * (Kessel.HauptantriebsZeit - ZD)) / (currentMillis - timerd);
+    p = (int)((Hauptantriebsfakter * 3600.0f * (float)(Kessel.HauptantriebsZeit - ZD)) / (float)deltaMs);
     // kessel_deltapelletsh.setValue(p); // HASensorNumber int
 
-    Kessel.Leistung = LEISTUNGKESSEL * TAKT100 * ((float)(Kessel.HauptantriebsZeit - ZD)) / (currentMillis - timerd);
+    Kessel.Leistung = LEISTUNGKESSEL * TAKT100 * ((float)(Kessel.HauptantriebsZeit - ZD)) / (float)deltaMs;
     // kessel_leistung.setValue(Kessel.Leistung); // HASensorNumber %2.1f
 
     // if (Kessel.Leistung < 1.0 )
     //   kessel_deltapelletsh.setValue(0); // HASensorNumber int
 
     // Verbrauch pro Stunde gemessen über NA
-    // kessel_deltapelletnsh.setValue((int) (Kessel.AustragungsGesamtLaufzeit - AustragungsGesamtLaufzeit) * Nebenantriebsfaktor * 1000 * 3600.0 / ( currentMillis - timerd))); // HASensorNumber int
+    // kessel_deltapelletnsh.setValue((int)(((Kessel.AustragungsGesamtLaufzeit - AustragungsGesamtLaufzeit) * Nebenantriebsfaktor * 3600000.0f) / (float)deltaMs)); // HASensorNumber int
 
     AustragungsGesamtLaufzeit = Kessel.AustragungsGesamtLaufzeit;
     Umdrehungen = Kessel.HauptantriebUmdrehungen;
-    // kessel_deltat.setValue((millis() - timerd) / 1000); // HASensorNumber int
+    // kessel_deltat.setValue(deltaMs / 1000); // HASensorNumber int
     ZD = Kessel.HauptantriebsZeit;
     timerd = currentMillis;
   }
@@ -724,6 +747,8 @@ void otherStuff(unsigned long &currentMillis) {
 //////////////////////////////////////////////////////////////////////////
 void loop() {
   static unsigned char msgData[MSGMAXLENGTH];
+  static bool hasCtrlFrame = false;
+  static bool hasSenseFrame = false;
   int dataLength = 0, msgID = 0, frameID = 0;
 
   mqtt.loop();
@@ -734,22 +759,30 @@ void loop() {
   // if (frameStatus == FRAME_ERROR) debugLog(msgID, "Checksum error ID: %d", "kwb/error");
 
   if (frameStatus == FRAME_OK) {
-    if (msgID == 33) // Control message from operating unit to boiler
+    if (msgID == 33) { // Control message from operating unit to boiler
       readCTRLMSGFrame(msgData, currentMillis, dataLength);
-    else if (msgID == 32) // Sense message from boiler to operating unit
+      hasCtrlFrame = true;
+    } else if (msgID == 32) { // Sense message from boiler to operating unit
       readSenseMSGFrame(msgData, currentMillis, dataLength);
+      hasSenseFrame = true;
+    }
 
-    publishFastChangingValues();
+    if (hasCtrlFrame && hasSenseFrame) {
+      publishBoilerStateToHA(currentMillis);
+      publishFastChangingValues();
+    }
   }
 
   checkConnections(currentMillis);
 
-  //////////////////// timed update block (e.g. each minute) ////////////////////
-  if ((currentMillis - lastUpdateCycleMillis) >= ((unsigned long)updateEveryMinutes * 60UL * 1000UL)) {
+  //////////////////// timed update block (e.g. every 30 seconds) ////////////////////
+  if ((currentMillis - lastUpdateCycleMillis) >= ((unsigned long)updateEverySeconds * 1000UL)) {
 
     bytecounter = 0;
 
-    publishSlowlyChangingValues(currentMillis);
+    if (mqtt.isConnected() && hasCtrlFrame && hasSenseFrame) {
+      publishSlowlyChangingValues(currentMillis);
+    }
     otherStuff(currentMillis); // NOTE not sure this need yet (code not reviewed), but kept here for convenience
 
     memcpy(&oKessel, &Kessel, sizeof Kessel);
