@@ -507,30 +507,115 @@ void publishFastChangingValues() {
   }
 }
 
-void publishBoilerStateToHA (unsigned long &currentMillis) {
-  int boilerOnMins = (currentMillis - millisAtBoilerRestart) / (1000 * 60); // minutes since boiler started to run
-  if(boilerOnMins < 0) millisAtBoilerRestart = 0; // respect overflow of currentMillis
-  if (oKessel.Kesselstatus == 0) { // Off
-    if(currentMillis <= 2 * 60 *1000 && (Kessel.Photodiode >= 50 && Kessel.Rauchgastemperatur >= 85)) { // device just started - might be burning (within first 2 minutes after device start)
-      kessel.setValue("Brennt");
-      Kessel.Kesselstatus = 2;
-      millisRLAOpened = RLAGESAMTLAUFZEIT * 1000; // is probably fully opened if boiler is currently burning, faster dail in of the RLA percentage
-    } else if (Kessel.Geblaese > 300){
-      kessel.setValue("Neustart");
-      Kessel.Kesselstatus = 1;
-      millisAtBoilerRestart = currentMillis;
-    }
-  } else if (oKessel.Kesselstatus == 1 && Kessel.Rauchgastemperatur > 85 && Kessel.Geblaese < 2350) { // Restarted & starts to burn
-    kessel.setValue("Brennt");
-    Kessel.Kesselstatus = 2;
-  // NOTE switches too early to afterrun, thus added boilerOnMins to prevent switching just after it started burning, still buggy
-  } else if (oKessel.Kesselstatus == 2 && Kessel.Photodiode < 50 && Kessel.Geblaese > 2300 && boilerOnMins > 20) { // Burned & expires
-    kessel.setValue("Nachlauf");
-    Kessel.Kesselstatus = 3;
+void setBoilerState(int newState, const char* label) {
+  if (Kessel.Kesselstatus != newState) {
+    Kessel.Kesselstatus = newState;
+    kessel.setValue(label);
   }
-  if (Kessel.Photodiode < 20 && Kessel.Geblaese < 300) { // turn off and emergency escape
-    kessel.setValue("Aus");
-    Kessel.Kesselstatus = 0;
+}
+
+void publishBoilerStateToHA(unsigned long currentMillis) {
+  static bool bootSynced = false;
+  static uint8_t afterrunCycles = 0;
+  static uint8_t burnRecoveryCycles = 0;
+  static uint8_t offCycles = 0;
+
+  bool isShuttingOff = (Kessel.Rauchsauger == 0) && (Kessel.Zuendung == 0) &&
+                       (Kessel.Geblaese < 300) && (Kessel.Photodiode < 20);
+  bool isStarting = (Kessel.Zuendung == 1) || ((Kessel.Rauchsauger == 1) && (Kessel.Geblaese > 300));
+  bool isBurningSteady = (Kessel.Rauchsauger == 1) && (Kessel.Zuendung == 0) &&
+                         (Kessel.Rauchgastemperatur >= 85.0) &&
+                         ((Kessel.Photodiode >= 45) || ((Kessel.Geblaese >= 600) && (Kessel.Geblaese < 2250)));
+
+  if (!bootSynced) {
+    bootSynced = true;
+    if ((Kessel.Rauchsauger == 1) && (Kessel.Photodiode >= 45) && (Kessel.Rauchgastemperatur >= 85.0)) {
+      millisAtBoilerRestart = currentMillis;
+      millisRLAOpened = RLAGESAMTLAUFZEIT * 1000UL; // assume open if already burning on boot
+      setBoilerState(2, "Brennt");
+    } else if (isStarting) {
+      millisAtBoilerRestart = currentMillis;
+      setBoilerState(1, "Neustart");
+    } else {
+      Kessel.Kesselstatus = 0;
+      kessel.setValue("Aus");
+    }
+    return;
+  }
+
+  if (isShuttingOff) {
+    if (offCycles < 255) offCycles++;
+  } else {
+    offCycles = 0;
+  }
+
+  unsigned long boilerOnMins = (currentMillis - millisAtBoilerRestart) / 60000UL;
+
+  switch (Kessel.Kesselstatus) {
+    case 0: // Aus
+      afterrunCycles = 0;
+      burnRecoveryCycles = 0;
+      if (isStarting) {
+        millisAtBoilerRestart = currentMillis;
+        offCycles = 0;
+        setBoilerState(1, "Neustart");
+      }
+      break;
+
+    case 1: // Neustart
+      afterrunCycles = 0;
+      burnRecoveryCycles = 0;
+      if (isBurningSteady) {
+        setBoilerState(2, "Brennt");
+      } else if (offCycles >= 2) {
+        setBoilerState(0, "Aus");
+      }
+      break;
+
+    case 2: // Brennt
+      burnRecoveryCycles = 0;
+      if ((Kessel.Rauchsauger == 1) && (Kessel.Zuendung == 0) && (Kessel.Reinigung == 0) &&
+          (Kessel.Photodiode < 40) && (Kessel.Geblaese > 2200) && (boilerOnMins >= 10)) {
+        if (afterrunCycles < 255) afterrunCycles++;
+      } else {
+        afterrunCycles = 0;
+      }
+
+      if (offCycles >= 2) {
+        afterrunCycles = 0;
+        setBoilerState(0, "Aus");
+      } else if (afterrunCycles >= 2) {
+        afterrunCycles = 0;
+        setBoilerState(3, "Nachlauf");
+      }
+      break;
+
+    case 3: // Nachlauf
+      afterrunCycles = 0;
+      if (Kessel.Zuendung == 1) {
+        burnRecoveryCycles = 0;
+        millisAtBoilerRestart = currentMillis;
+        setBoilerState(1, "Neustart");
+      } else if (isBurningSteady && ((Kessel.Photodiode >= 50) || (Kessel.Geblaese <= 2150))) {
+        if (burnRecoveryCycles < 255) burnRecoveryCycles++;
+        if (burnRecoveryCycles >= 2) {
+          burnRecoveryCycles = 0;
+          setBoilerState(2, "Brennt");
+        }
+      } else {
+        burnRecoveryCycles = 0;
+      }
+
+      if (offCycles >= 2) {
+        burnRecoveryCycles = 0;
+        setBoilerState(0, "Aus");
+      }
+      break;
+
+    default:
+      Kessel.Kesselstatus = 0;
+      kessel.setValue("Aus");
+      break;
   }
 }
 
