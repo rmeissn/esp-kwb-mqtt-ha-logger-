@@ -68,9 +68,8 @@ unsigned long millisRLAOpened = 0; // millis the RLA was opened from fully close
 unsigned long millisRLAStartedToMove = 0;
 unsigned long wifiPreviousTime = 0;
 unsigned long lastWifiConnectedMillis = 0;
-unsigned long lastMqttConnectedMillis = 0;
 int wifiReconnectDelay = 5; // mins
-const unsigned long disconnectRestartTimeoutMs = 15UL * 60UL * 1000UL; // restart if WiFi or MQTT stays disconnected for 15 min
+const unsigned long disconnectRestartTimeoutMs = 15UL * 60UL * 1000UL; // restart if WiFi stays disconnected for 15 min
 
 struct ef2 {
   float kwh = 0.1;
@@ -153,11 +152,7 @@ HASensorNumber kessel_leistung("kwb_kessel_leistung", HASensorNumber::PrecisionP
 void checkConnections(unsigned long currentMillis) {
   if (WiFi.status() == WL_CONNECTED) {
     lastWifiConnectedMillis = currentMillis;
-    if (mqtt.isConnected()) {
-      lastMqttConnectedMillis = currentMillis;
-    } else if ((currentMillis - lastMqttConnectedMillis) >= disconnectRestartTimeoutMs) {
-      ESP.restart();
-    }
+    wifiPreviousTime = currentMillis;
   } else {
     if ((currentMillis - lastWifiConnectedMillis) >= disconnectRestartTimeoutMs) {
       ESP.restart();
@@ -233,7 +228,7 @@ void setup() {
   configureSensor(kessel_ruecklauf, "Kessel Rücklauf", "mdi:thermometer", "°C" , "temperature");
   configureSensor(kessel_temperatur, "Kessel Temperatur", "mdi:thermometer", "°C" , "temperature");
   configureSensor(kessel_rauchgas, "Kessel Rauchgas", "mdi:thermometer", "°C" , "temperature");
-  configureSensor(kessel_energie, "Kessel Energie", "mdi:counter", "kWh", "temperature");
+  configureSensor(kessel_energie, "Kessel Energie", "mdi:counter", "kWh", "energy");
   configureSensor(kessel_brennerstunden, "Kessel Brennerstunden", "mdi:clock-outline", "h" , "duration");
   configureSensor(kessel_unterdruck, "Kessel Unterdruck", "mdi:gauge", "mbar", "pressure");
   configureSensor(kessel_rlageoeffnet, "Kessel RLA geöffnet", "mdi:valve", "%", "");
@@ -256,7 +251,7 @@ void setup() {
 
   mqtt.begin(MQTTSERVER, MQTTUSER, MQTTPASSWORD);
 
-  lastUpdateCycleMillis = timerd = lastMqttConnectedMillis = millis();
+  lastUpdateCycleMillis = timerd = millis();
 }
 
 // String lowerPrecision(float in){
@@ -643,23 +638,24 @@ void otherStuff(unsigned long &currentMillis) {
 ///////////////////// Main Loop //////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////
 void loop() {
-  unsigned char msgData[MSGMAXLENGTH];
-  int dataLength, msgID, frameID;
+  static unsigned char msgData[MSGMAXLENGTH];
+  int dataLength = 0, msgID = 0, frameID = 0;
 
   mqtt.loop();
   ArduinoOTA.handle();
 
-  bool error = readFrame(msgData, msgID, dataLength, frameID); // Read RS485 dataframe
-  // if (error) debugLog(msgID, "Checksum error ID: %d", "kwb/error");
-
   unsigned long currentMillis = millis();
+  FrameStatus frameStatus = readFrame(msgData, msgID, dataLength, frameID, currentMillis); // Read RS485 dataframe non-blocking
+  // if (frameStatus == FRAME_ERROR) debugLog(msgID, "Checksum error ID: %d", "kwb/error");
 
-  if (msgID == 33) // Control message from operating unit to boiler
-    readCTRLMSGFrame(msgData, currentMillis, dataLength);
-  else if (msgID == 32) // Sense message from boiler to operating unit
-    readSenseMSGFrame(msgData, currentMillis, dataLength);
+  if (frameStatus == FRAME_OK) {
+    if (msgID == 33) // Control message from operating unit to boiler
+      readCTRLMSGFrame(msgData, currentMillis, dataLength);
+    else if (msgID == 32) // Sense message from boiler to operating unit
+      readSenseMSGFrame(msgData, currentMillis, dataLength);
 
-  publishFastChangingValues();
+    publishFastChangingValues();
+  }
 
   checkConnections(currentMillis);
 
@@ -675,5 +671,7 @@ void loop() {
     lastUpdateCycleMillis = currentMillis;
   }
 
-  delay(5); // delay at the end of the loop to not trigger the SW Watchdog
+  if ((frameStatus != FRAME_OK) || !Serial.available()) {
+    delay(5); // delay at the end of the loop to not trigger the SW Watchdog
+  }
 }
