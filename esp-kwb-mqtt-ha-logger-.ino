@@ -36,7 +36,8 @@ int updateEveryMinutes = 1;
 #define MSGMAXLENGTH 256 // in byte
 int HauptantriebsImpuls = 0;
 long Umdrehungen = 0, ZD = 0, AustragungsGesamtLaufzeit = 0;
-long NebenantriebsZeit = 0, HauptantriebsZeit = 0, HANAtimer = 0;  // HANAtimer = Timer zur Ausgabe der Hauptantrieb/Nebenantrieb Ratio
+long NebenantriebsZeit = 0, HauptantriebsZeit = 0;
+unsigned long HANAtimer = 0;  // HANAtimer = Timer zur Ausgabe der Hauptantrieb/Nebenantrieb Ratio
 
 extern long bytecounter;
 extern long framecounter;
@@ -66,7 +67,10 @@ unsigned long millisAtBoilerRestart = 0; // millis since boiler restarted
 unsigned long millisRLAOpened = 0; // millis the RLA was opened from fully closed
 unsigned long millisRLAStartedToMove = 0;
 unsigned long wifiPreviousTime = 0;
-int wifiReconnectDelay = 5; //mins
+unsigned long lastWifiConnectedMillis = 0;
+unsigned long lastMqttConnectedMillis = 0;
+int wifiReconnectDelay = 5; // mins
+const unsigned long disconnectRestartTimeoutMs = 15UL * 60UL * 1000UL; // restart if WiFi or MQTT stays disconnected for 15 min
 
 struct ef2 {
   float kwh = 0.1;
@@ -146,11 +150,22 @@ HASensorNumber kessel_unterdruck("kwb_kessel_unterdruck", HASensorNumber::Precis
 HASensorNumber kessel_rlageoeffnet("kwb_kessel_rlageoeffnet", HASensorNumber::PrecisionP0);
 HASensorNumber kessel_leistung("kwb_kessel_leistung", HASensorNumber::PrecisionP0);
 
-void wifiReconnectIfLost(unsigned long &currentTime) {
-  if ((WiFi.status() != WL_CONNECTED) && (currentTime - wifiPreviousTime >= wifiReconnectDelay * 60 * 10)) {
-    WiFi.disconnect();
-    WiFi.reconnect();
-    wifiPreviousTime = currentTime;
+void checkConnections(unsigned long currentMillis) {
+  if (WiFi.status() == WL_CONNECTED) {
+    lastWifiConnectedMillis = currentMillis;
+    if (mqtt.isConnected()) {
+      lastMqttConnectedMillis = currentMillis;
+    } else if ((currentMillis - lastMqttConnectedMillis) >= disconnectRestartTimeoutMs) {
+      ESP.restart();
+    }
+  } else {
+    if ((currentMillis - lastWifiConnectedMillis) >= disconnectRestartTimeoutMs) {
+      ESP.restart();
+    }
+    if ((currentMillis - wifiPreviousTime) >= ((unsigned long)wifiReconnectDelay * 60UL * 1000UL)) {
+      WiFi.reconnect();
+      wifiPreviousTime = currentMillis;
+    }
   }
 }
 
@@ -160,13 +175,14 @@ void wifi_on() {
   WiFi.macAddress(mac);
   device.setUniqueId(mac, sizeof(mac));
   WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(WIFISSID, WIFIPW);
   if(WiFi.waitForConnectResult() != WL_CONNECTED) {
     // Serial.println("Connection Failed! Rebooting...");
     delay(5000);
     ESP.restart();
   }
-  wifiPreviousTime = millis();
+  wifiPreviousTime = lastWifiConnectedMillis = millis();
 }
 
 void configureSensor(HASensorNumber &sensor, const char name[], const char icon[], const char unit[], const char deviceClass[]){
@@ -240,7 +256,7 @@ void setup() {
 
   mqtt.begin(MQTTSERVER, MQTTUSER, MQTTPASSWORD);
 
-  lastUpdateCycleMillis = timerd = millis();
+  lastUpdateCycleMillis = timerd = lastMqttConnectedMillis = millis();
 }
 
 // String lowerPrecision(float in){
@@ -253,25 +269,25 @@ bool tempdiff(float &a, float &b, float &diff) {
   return (abs(a - b) >= diff);
 }
 
-void debugLog(int value, char* formatter, char* topic) {
+void debugLog(int value, const char* formatter, const char* topic) {
   char msg[64];
-  sprintf(msg, formatter, value);
+  snprintf(msg, sizeof(msg), formatter, value);
   mqtt.publish(topic, msg);
 }
 
-void debugLog(unsigned long value, char* formatter, char* topic) {
+void debugLog(unsigned long value, const char* formatter, const char* topic) {
   char msg[64];
-  sprintf(msg, formatter, value);
+  snprintf(msg, sizeof(msg), formatter, value);
   mqtt.publish(topic, msg);
 }
 
-void debugLog(float value, char* formatter, char* topic) {
+void debugLog(float value, const char* formatter, const char* topic) {
   char msg[64];
-  sprintf(msg, formatter, value);
+  snprintf(msg, sizeof(msg), formatter, value);
   mqtt.publish(topic, msg);
 }
 
-void publishValueToMQTTOnChange(int &current, int &old, char* topic) {
+void publishValueToMQTTOnChange(int &current, int &old, const char* topic) {
   if (current != old) {
     debugLog(current, "%d", topic);
     old = current;
@@ -560,10 +576,10 @@ void publishSlowlyChangingValues(unsigned long &currentMillis) {
 // TODO review the code of this function
 // currentMillis =  current milliseconds the MCU is on
 void otherStuff(unsigned long &currentMillis) {
-  // debugLog(Kessel.Proztemperatur, "%f", "kwb/Proztemperatur");
+  // debugLog(Kessel.Proztemperatur, "%.1f", "kwb/Proztemperatur");
   // debugLog(Kessel.HauptantriebUmdrehungen, "%d", "kwb/HauptantriebUmdrehungen");
-  // debugLog(Kessel.HauptantriebsZeit, "%d", "kwb/HauptantriebsZeit");
-  // debugLog(Kessel.Hauptantriebtakt, "%f", "kwb/Hauptantriebtakt");
+  // debugLog(Kessel.HauptantriebsZeit, "%lu", "kwb/HauptantriebsZeit");
+  // debugLog(Kessel.Hauptantriebtakt, "%lu", "kwb/Hauptantriebtakt");
   // debugLog(Kessel.Hauptantrieb, "%d", "kwb/Hauptantrieb");
   // debugLog(Kessel.AustragungsGesamtLaufzeit, "%d", "kwb/AustragungsGesamtLaufzeit");
   // kessel_proztemperatur.setValue(Kessel.Proztemperatur); // HASensorNumber %.1f
@@ -607,7 +623,7 @@ void otherStuff(unsigned long &currentMillis) {
   //////////////////////////////////////////////
   // Berechnung HA/NA Verhältnis
   // Alle xx Min  berechnen (-> ca. 1.9 wenn der sinkt gibt es Förderprobleme)
-  if (currentMillis > (HANAtimer + 30 * 60 * 1000)) {
+  if ((currentMillis - HANAtimer) >= (30UL * 60UL * 1000UL)) {
     HANAtimer = currentMillis;
     float v;
 
@@ -645,8 +661,10 @@ void loop() {
 
   publishFastChangingValues();
 
+  checkConnections(currentMillis);
+
   //////////////////// timed update block (e.g. each minute) ////////////////////
-  if (currentMillis > (lastUpdateCycleMillis + updateEveryMinutes * 60 * 1000)) {
+  if ((currentMillis - lastUpdateCycleMillis) >= ((unsigned long)updateEveryMinutes * 60UL * 1000UL)) {
 
     bytecounter = 0;
 
@@ -655,7 +673,6 @@ void loop() {
 
     memcpy(&oKessel, &Kessel, sizeof Kessel);
     lastUpdateCycleMillis = currentMillis;
-    wifiReconnectIfLost(currentMillis);
   }
 
   delay(5); // delay at the end of the loop to not trigger the SW Watchdog
