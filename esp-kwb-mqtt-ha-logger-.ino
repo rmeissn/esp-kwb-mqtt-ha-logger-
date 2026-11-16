@@ -480,6 +480,7 @@ void publishFastChangingValues() {
 
   publishValueToMQTTOnChange(Kessel.HK1_Heizkreismischer, oKessel.HK1_Heizkreismischer, "kwb/Heizkreismischer");
   publishValueToMQTTOnChange(Kessel.DrehungSaugschlauch, oKessel.DrehungSaugschlauch, "kwb/DrehungSaugschlauch");
+  // publishValueToMQTTOnChange(Kessel.RLAVentil, oKessel.RLAVentil, "kwb/RLAVentil");
 
   publishValueToHAOnChange(Kessel.Boilerpumpe, oKessel.Boilerpumpe, kessel_boilerpumpe);
   publishValueToHAOnChange(Kessel.Heizkreispumpe, oKessel.Heizkreispumpe, kessel_heizkreispumpe);
@@ -559,6 +560,12 @@ void publishSlowlyChangingValues(unsigned long &currentMillis) {
 // TODO review the code of this function
 // currentMillis =  current milliseconds the MCU is on
 void otherStuff(unsigned long &currentMillis) {
+  // debugLog(Kessel.Proztemperatur, "%f", "kwb/Proztemperatur");
+  // debugLog(Kessel.HauptantriebUmdrehungen, "%d", "kwb/HauptantriebUmdrehungen");
+  // debugLog(Kessel.HauptantriebsZeit, "%d", "kwb/HauptantriebsZeit");
+  // debugLog(Kessel.Hauptantriebtakt, "%f", "kwb/Hauptantriebtakt");
+  // debugLog(Kessel.Hauptantrieb, "%d", "kwb/Hauptantrieb");
+  // debugLog(Kessel.AustragungsGesamtLaufzeit, "%d", "kwb/AustragungsGesamtLaufzeit");
   // kessel_proztemperatur.setValue(Kessel.Proztemperatur); // HASensorNumber %.1f
   // kessel_HauptantriebUmdrehungen.setValue(Kessel.HauptantriebUmdrehungen); // HASensorNumber int
   // kessel_HauptantriebsZeit.setValue(Kessel.HauptantriebsZeit); // HASensorNumber int
